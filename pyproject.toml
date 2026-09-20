@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flowbot"
+version = "0.1.0"
+description = "15m BTC momentum trading bot: real market data, real order book, real fill simulation, paper money."
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "httpx>=0.27",
+    "websockets>=12.0",
+    "pydantic>=2.6",
+    "PyYAML>=6.0",
+]
+
+[project.scripts]
+flowbot = "flowbot.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["flowbot*"]
+
+[tool.setuptools.package-data]
+"flowbot.server" = ["dashboard/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]

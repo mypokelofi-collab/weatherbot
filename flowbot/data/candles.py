@@ -1,0 +1,126 @@
+"""Trade tape -> OHLCV bars.
+
+We build our own bars from the raw prints instead of consuming the venue's
+kline stream for three reasons: the buy/sell aggressor split (our flow signal)
+is not in the kline payload, bars stay consistent when we replay a recording,
+and we control exactly when a bar is considered closed.
+"""
+
+from __future__ import annotations
+
+from typing import Callable, Iterable
+
+from ..core.clock import bar_open
+from ..core.types import Candle, Side, Trade
+
+
+class CandleAggregator:
+    """Aggregates trades into fixed-interval candles.
+
+    `on_close` fires once per completed bar, in order. A bar closes when the
+    first trade of the next bucket arrives, or when `flush_until` is called by
+    the clock (so a quiet market still closes its bars on time).
+    """
+
+    def __init__(self, step_ms: int, max_history: int = 2000) -> None:
+        self.step_ms = step_ms
+        self.max_history = max_history
+        self.history: list[Candle] = []
+        self.current: Candle | None = None
+        self._listeners: list[Callable[[Candle], None]] = []
+
+    def on_close(self, fn: Callable[[Candle], None]) -> None:
+        self._listeners.append(fn)
+
+    # -- ingest ------------------------------------------------------------
+    def seed(self, candles: Iterable[Candle]) -> None:
+        """Backfill closed history (REST klines) before the live feed starts."""
+        for c in candles:
+            c.closed = True
+            self.history.append(c)
+        self._trim()
+
+    def add_trade(self, trade: Trade) -> Candle | None:
+        """Feed one real print. Returns the bar that just closed, if any."""
+        open_time = bar_open(trade.ts, self.step_ms)
+        closed_bar = None
+
+        if self.current is None:
+            self.current = self._new_bar(open_time, trade.price)
+        elif open_time > self.current.open_time:
+            closed_bar = self._close_current()
+            self.current = self._new_bar(open_time, trade.price)
+        elif open_time < self.current.open_time:
+            # Out-of-order print from a reconnect; the bar is already closed.
+            return None
+
+        c = self.current
+        c.high = max(c.high, trade.price)
+        c.low = min(c.low, trade.price)
+        c.close = trade.price
+        c.volume += trade.qty
+        c.quote_volume += trade.qty * trade.price
+        c.trades += 1
+        if trade.side is Side.BUY:
+            c.buy_volume += trade.qty
+        else:
+            c.sell_volume += trade.qty
+        return closed_bar
+
+    def flush_until(self, ts: int) -> list[Candle]:
+        """Close any bar whose window has elapsed, even with no trades in it.
+
+        A market that goes quiet still has to advance the bar clock, otherwise
+        every indicator window silently stretches in wall-clock terms. Empty
+        bars continue at the previous close with zero volume.
+        """
+        closed: list[Candle] = []
+        while self.current is not None and ts >= self.current.close_time:
+            next_open = self.current.close_time
+            bar = self._close_current()
+            if bar is None:
+                break
+            closed.append(bar)
+            self.current = self._new_bar(next_open, bar.close)
+        return closed
+
+    # -- internals ---------------------------------------------------------
+    def _new_bar(self, open_time: int, price: float) -> Candle:
+        return Candle(
+            open_time=open_time,
+            close_time=open_time + self.step_ms,
+            open=price,
+            high=price,
+            low=price,
+            close=price,
+        )
+
+    def _close_current(self) -> Candle | None:
+        bar = self.current
+        if bar is None:
+            return None
+        bar.closed = True
+        self.history.append(bar)
+        self._trim()
+        self.current = None
+        for fn in self._listeners:
+            fn(bar)
+        return bar
+
+    def _trim(self) -> None:
+        if len(self.history) > self.max_history:
+            self.history = self.history[-self.max_history :]
+
+    # -- reads -------------------------------------------------------------
+    @property
+    def closes(self) -> list[float]:
+        return [c.close for c in self.history]
+
+    def recent(self, n: int) -> list[Candle]:
+        return self.history[-n:]
+
+    def series(self, n: int, include_open: bool = True) -> list[Candle]:
+        out = self.history[-n:]
+        if include_open and self.current is not None:
+            out = out + [self.current]
+        return out
