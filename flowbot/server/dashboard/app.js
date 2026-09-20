@@ -147,6 +147,7 @@ function renderAll() {
   renderOrders();
   renderLog();
   renderParams();
+  renderPolymarket();
   renderDataPane();
 }
 
@@ -157,6 +158,7 @@ function renderLive() {
   renderPosition();
   renderBook();
   renderTape();
+  renderPolymarket();
   renderDataPane();
 }
 
@@ -564,6 +566,62 @@ function renderLog() {
     row.appendChild(el('span', 'kind', e.kind));
     row.appendChild(el('span', 'msg', e.message));
     log.appendChild(row);
+  }
+}
+
+function renderPolymarket() {
+  const pm = state.snap.polymarket;
+  const card = $('polyCard');
+  if (!pm || !pm.enabled) { card.hidden = true; return; }
+  card.hidden = false;
+
+  const st = pm.stats || {};
+  $('polyHint').textContent =
+    `${st.open || 0} open · ${st.settled || 0} settled · ${fmtUsd(pm.pnl || 0)}`;
+
+  const kv = $('polyKv');
+  kv.replaceChildren();
+  const add = (k, v, klass) => {
+    kv.appendChild(el('dt', '', k));
+    kv.appendChild(el('dd', klass || '', v));
+  };
+  add('paper bankroll', fmtUsd(pm.equity || 0));
+  add('settled pnl', fmtUsd(st.pnl || 0), cls(st.pnl || 0));
+  add('win rate', st.settled ? `${st.win_rate}% of ${st.settled}` : '—');
+  if (pm.calibration) {
+    add('brier', `${pm.calibration.brier} (skill ${pm.calibration.brier_skill_score})`);
+  }
+  if (pm.last_error) add('last error', pm.last_error, 'neg');
+
+  const body = $('polyTable').querySelector('tbody');
+  body.replaceChildren();
+  const rows = [
+    ...(pm.positions || []).map((p) => ({
+      slug: p.slug, model: p.model_p_at_entry, book: p.mark, edge: p.edge_at_entry,
+      left: (p.end_ts - (state.snap.ts || Date.now())), status: `holding ${p.shares} ${p.side}`,
+    })),
+    ...(pm.assessments || []).map((a) => ({
+      slug: a.slug, model: a.model_p, book: a.market_p, edge: a.edge,
+      left: a.seconds_left * 1000,
+      status: a.tradable ? `ready · ${a.shares} ${a.side}` : (a.blockers[0] || 'no edge'),
+    })),
+  ];
+  if (!rows.length) {
+    const tr = el('tr');
+    const td = el('td', 'empty', 'no matching markets yet');
+    td.setAttribute('colspan', '6');
+    tr.appendChild(td);
+    body.appendChild(tr);
+  }
+  for (const r of rows.slice(0, 10)) {
+    const tr = el('tr');
+    tr.appendChild(el('td', 'strong', r.slug.replace(/-/g, ' ').slice(0, 34)));
+    tr.appendChild(el('td', '', `${(r.model * 100).toFixed(0)}%`));
+    tr.appendChild(el('td', '', `${(r.book * 100).toFixed(0)}%`));
+    tr.appendChild(el('td', cls(r.edge), `${(r.edge * 100) >= 0 ? '+' : ''}${(r.edge * 100).toFixed(1)}pt`));
+    tr.appendChild(el('td', '', duration(r.left)));
+    tr.appendChild(el('td', '', r.status));
+    body.appendChild(tr);
   }
 }
 

@@ -58,6 +58,14 @@ def build_trader(cfg: AppConfig) -> tuple[Trader, Recorder | None]:
         recorder.attach(feed)
         log.info("recording market data to %s", path)
 
+    if cfg.polymarket.enabled:
+        from .polymarket.engine import PolymarketPipeline
+
+        trader.attach_polymarket(
+            PolymarketPipeline(cfg.polymarket, equity=cfg.risk.start_equity)
+        )
+        log.info("polymarket pipeline enabled (paper, read-only)")
+
     return trader, recorder
 
 

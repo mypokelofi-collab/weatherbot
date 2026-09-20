@@ -161,3 +161,39 @@ async def test_record_then_replay_round_trip(tmp_path):
     assert seen["trades"] == info["trades"]
     assert seen["books"] == info["books"]
     assert replay.instrument.tick_size == 0.1
+
+
+async def test_a_blocked_entry_does_not_wedge_the_bot(tmp_path):
+    """An entry that never fills must release the bot to try again.
+
+    Regression: an unfillable market order left `_entry_ctx` set, so every
+    later signal was silently skipped for the rest of the session.
+    """
+    cfg = AppConfig()
+    cfg.state_dir = str(tmp_path / "state")
+    cfg.data.venue = "simulator"
+    cfg.data.sim_speed = 1800          # coarse enough to strain the clock
+    cfg.data.sim_seed = 13
+    cfg.data.backfill_bars = 200
+    cfg.risk.cooldown_bars = 0
+    cfg.execution.market_timeout_s = 5
+
+    feed = build_feed(cfg.data)
+    trader = Trader(cfg, feed, EventBus(), store=None)
+    await trader.start()
+    await asyncio.sleep(12)
+    snap = trader.snapshot()
+    await trader.stop()
+
+    # Whether a signal fired in this window is up to the market, so the
+    # assertion is on the invariant, not on activity: the entry slot is only
+    # ever held by an order that is actually working.
+    exec_stats = snap["execution"]
+    assert snap["bars_seen"] > 200
+    assert exec_stats["pending"] == 0, "no order may sit pending indefinitely"
+    assert trader._entry_ctx is None or snap["portfolio"]["position"] is not None
+
+    # And the clock the fill engine sees must track the data, not drift away
+    # from it - a stale-looking book silently blocks every fill.
+    assert snap["book"] is not None
+    assert snap["venue_now"] - snap["book"]["ts"] < cfg.execution.book_stale_ms

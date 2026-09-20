@@ -98,6 +98,7 @@ class Trader:
         self._exit_is_flip = False
         self._last_equity_store = 0
         self._loop_task: asyncio.Task | None = None
+        self.polymarket = None          # optional PolymarketPipeline
 
         self._wire()
 
@@ -142,6 +143,8 @@ class Trader:
             })
 
         await self.feed.start()
+        if self.polymarket is not None:
+            await self.polymarket.start()
         self.running = True
         self._loop_task = asyncio.create_task(self._housekeeping(), name="trader-loop")
         self._event("start", f"bot started on {self.feed.venue} {self.cfg.data.symbol} "
@@ -156,6 +159,8 @@ class Trader:
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
             self._loop_task = None
+        if self.polymarket is not None:
+            await self.polymarket.stop()
         await self.feed.stop()
         self._event("stop", "bot stopped")
         if self.store:
@@ -482,6 +487,22 @@ class Trader:
             pos.to_dict(self.portfolio.mark) if pos else None,
         )
 
+    def attach_polymarket(self, pipeline) -> None:
+        """Run the prediction-market pipeline off the same signal and spot.
+
+        It reads; it never touches the perp position or the perp equity.
+        """
+        self.polymarket = pipeline
+        pipeline.bind(
+            spot_provider=lambda: (
+                (self.last_book.mid if self.last_book else self.last_trade_price),
+                (self.last_signal.features.get("realized_vol", 0.5)
+                 if self.last_signal else 0.5) or 0.5,
+            ),
+            signal_provider=lambda: self.last_signal.score if self.last_signal else 0.0,
+        )
+        self._event("polymarket", "prediction-market pipeline attached (paper, read-only)")
+
     # -- controls ----------------------------------------------------------
     def set_trading_enabled(self, enabled: bool) -> None:
         self.trading_enabled = enabled
@@ -576,6 +597,10 @@ class Trader:
             "cvd": self.cvd_series.tail(400),
             "markers": self.markers[-120:],
             "events": self.events.tail(60),
+            "polymarket": (
+                self.polymarket.state() if self.polymarket is not None
+                else {"enabled": False}
+            ),
             "config": {
                 "signal": self.cfg.signal.model_dump(),
                 "risk": self.cfg.risk.model_dump(),

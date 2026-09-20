@@ -183,6 +183,7 @@ class PaperBroker:
             order = self.engine.submit(
                 side=intent.side, qty=intent.remaining, order_type=OrderType.MARKET,
                 tag=intent.tag, max_slippage_bps=budget, link_id=intent.id,
+                timeout_s=self.cfg.market_timeout_s,
             )
         else:
             if intent.side is Side.BUY:

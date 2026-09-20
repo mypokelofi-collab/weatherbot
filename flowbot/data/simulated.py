@@ -149,6 +149,10 @@ class SimulatedFeed(MarketFeed):
             self._rebuild_book()
             self._emit_book(self.book.snapshot(25))
 
+            # Prints are stamped inside the interval that just elapsed, so the
+            # book snapshot above is always the most recent event. Without
+            # this, a high `speed` makes every book look seconds stale to the
+            # fill engine and nothing ever fills.
             n_trades = self._poisson(self.trades_per_sec * dt_s)
             lean = self.drift / MAX_DRIFT                     # -1..1
             p_buy = min(0.92, max(0.08, 0.5 + 0.22 * lean + self.rng.gauss(0, 0.05)))
@@ -161,7 +165,7 @@ class SimulatedFeed(MarketFeed):
                 qty = max(self.instrument.min_qty, min(qty, 8.0))
                 self.cum_delta += qty if is_buy else -qty
                 self._emit_trade(Trade(
-                    ts=self.sim_ts + self.rng.randrange(0, max(1, int(dt_s * 1000))),
+                    ts=self.sim_ts - self.rng.randrange(0, max(1, int(dt_s * 1000))),
                     price=price, qty=qty, side=side, trade_id=trade_id,
                 ))
             await asyncio.sleep(self.tick_wall_s)

@@ -124,6 +124,10 @@ class ExecConfig(BaseModel):
     exit_order: Literal["market", "limit", "post_only"] = "market"
     limit_offset_ticks: int = 1          # how far inside the spread we post
     limit_timeout_s: float = 45.0        # then convert to market
+    # A market order that has not filled in this long is not going to: the
+    # book is desynced or the feed stalled. Cancel it rather than leave the
+    # bot holding an entry slot it can never use.
+    market_timeout_s: float = 30.0
     taker_fee_bps: float = 4.5           # Binance USDⓈ-M taker, no VIP
     maker_fee_bps: float = 1.8
     latency_ms: int = 120                # submit -> venue ack round trip

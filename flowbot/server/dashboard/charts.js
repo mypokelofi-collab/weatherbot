@@ -393,6 +393,14 @@ export class EquityChart {
     let lo = Infinity, hi = -Infinity;
     for (const [, v] of p) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
     lo = Math.min(lo, this.baseline); hi = Math.max(hi, this.baseline);
+    // A brand-new session has a flat curve; without a floor on the range the
+    // axis zooms into cents and a straight line looks like a cliff.
+    const minSpan = Math.abs(this.baseline || hi) * 0.01;
+    if (hi - lo < minSpan) {
+      const mid = (hi + lo) / 2;
+      lo = mid - minSpan / 2;
+      hi = mid + minSpan / 2;
+    }
     const pad = (hi - lo) * 0.12 || 1;
     lo -= pad; hi += pad;
     const t0 = p[0][0], t1 = p[p.length - 1][0] || t0 + 1;

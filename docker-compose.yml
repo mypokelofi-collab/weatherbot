@@ -1,0 +1,44 @@
+# flowbot on a VPS.
+#
+#   cp .env.example .env     # set a dashboard token before exposing the port
+#   docker compose up -d --build
+#   docker compose logs -f
+#
+# The dashboard is published on ${HOST_PORT:-8032}. Bound to 0.0.0.0 by
+# default so it is reachable from your browser - which is exactly why
+# FLOWBOT_SERVER__AUTH_TOKEN should be set. To keep it private instead, set
+# BIND_ADDR=127.0.0.1 and reach it over an SSH tunnel:
+#     ssh -N -L 8032:127.0.0.1:8032 user@your-vps
+
+services:
+  flowbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: flowbot:latest
+    container_name: flowbot
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      FLOWBOT_SERVER__HOST: "0.0.0.0"
+      FLOWBOT_SERVER__PORT: "8032"
+      FLOWBOT_STATE_DIR: "/app/data/state"
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${HOST_PORT:-8032}:8032"
+    volumes:
+      # Trade ledger, equity history and recordings survive redeploys.
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8032/api/health', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 45s
+      retries: 3

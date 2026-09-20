@@ -152,6 +152,11 @@ def create_app(trader: Trader, cfg: AppConfig) -> FastAPI:
     async def events(limit: int = 100) -> JSONResponse:
         return JSONResponse(trader.events.tail(limit))
 
+    @app.get("/api/polymarket")
+    async def polymarket() -> JSONResponse:
+        pipe = trader.polymarket
+        return JSONResponse(pipe.state() if pipe else {"enabled": False})
+
     @app.get("/api/config")
     async def config() -> JSONResponse:
         return JSONResponse(cfg.to_dict())

@@ -220,6 +220,23 @@
         <div class="tape" id="tape"></div>
       </section>
 
+      <section class="card" id="polyCard" hidden>
+        <header>
+          <h2>Polymarket · BTC up/down</h2>
+          <span class="hint" id="polyHint"></span>
+        </header>
+        <dl class="kv" id="polyKv"></dl>
+        <div class="table-wrap">
+          <table id="polyTable">
+            <thead><tr><th>market</th><th>model</th><th>book</th><th>edge</th><th>left</th><th>status</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="hint" style="margin:8px 0 0">
+          Read-only and paper: this pipeline can price and simulate, never sign an order.
+        </p>
+      </section>
+
       <section class="card">
         <header><h2>Activity</h2></header>
         <div class="log" id="log"></div>

@@ -216,3 +216,21 @@ def test_liquidity_score_drops_with_a_wide_spread():
         asks=[BookLevel(64_020, 2.0)],
     )
     assert liquidity_score(tight) > liquidity_score(wide)
+
+
+def test_market_order_that_cannot_fill_is_cancelled_not_stuck(instrument):
+    """A desynced book must not leave an order pending forever - that would
+    hold the bot's entry slot for the rest of the session."""
+    b = PaperBroker(ExecConfig(latency_ms=0, market_timeout_s=10), instrument)
+    b.set_book(make_book(ts=1_000, mid=64_000))
+    b.tick(120_000)                       # feed went quiet: the book is stale
+
+    intent = b.execute(Side.BUY, 0.1, tag="entry · test", urgency="urgent")
+    order = b.engine.orders[intent.order_ids[0]]
+    assert order.status is OrderStatus.NEW
+    assert order.expire_at > 0
+
+    b.tick(140_000)
+    assert order.status is OrderStatus.CANCELED
+    assert intent.done and intent.filled_qty == 0
+    assert intent.result == "unfilled"
