@@ -40,6 +40,7 @@ from ..data.candles import CandleAggregator
 from ..data.feed import MarketFeed
 from ..execution.broker import Intent, PaperBroker
 from ..execution.microstructure import book_pressure, walk_book
+from ..signals import indicators as ind
 from ..signals.engine import SignalEngine
 from ..signals.features import TapeWindow
 from .portfolio import Portfolio
@@ -129,6 +130,7 @@ class Trader:
                 log.warning("instrument load failed: %s", exc)
 
         await self._backfill()
+        self._preflight()
 
         if self.store:
             self.store.start_session({
@@ -195,6 +197,54 @@ class Trader:
             self.feed.health.last_trade_ts or 0,
             self.feed.health.last_book_ts or 0,
         )
+
+    def _preflight(self) -> None:
+        """Say out loud what this bankroll can actually do on this venue.
+
+        A small account plus a venue minimum is the most common reason a bot
+        appears to run fine and never trades. Better to state the arithmetic
+        once, at boot, than to leave it to be discovered from an empty trade
+        table a week later.
+        """
+        bars = self.aggregator.history
+        if not bars:
+            return
+        price = bars[-1].close
+        atr = ind.last(ind.atr(bars, self.cfg.signal.atr_period), 0.0)
+        if price <= 0 or atr <= 0:
+            return
+
+        equity = self.portfolio.equity
+        floor_qty = self.instrument.smallest_tradable(price)
+        stop_distance = self.cfg.risk.stop_atr_mult * atr
+        wanted = equity * self.cfg.risk.risk_per_trade_pct / 100.0 / stop_distance
+        min_risk_pct = floor_qty * stop_distance / equity * 100.0 if equity else 0.0
+
+        if wanted >= floor_qty:
+            self._event(
+                "preflight",
+                f"bankroll ${equity:,.0f}: risk-based size {wanted:.5f} "
+                f"{self.instrument.base} clears the venue minimum "
+                f"{floor_qty:g} - sizing is risk-driven as intended",
+            )
+            return
+
+        self._event(
+            "preflight",
+            f"bankroll ${equity:,.0f} is below what {self.instrument.symbol} "
+            f"sizing wants: the venue minimum is {floor_qty:g} "
+            f"{self.instrument.base} (${floor_qty * price:,.0f}, "
+            f"{floor_qty * price / equity:.1f}x equity), which at the current "
+            f"ATR of {atr / price * 100:.2f}% risks {min_risk_pct:.2f}% per trade "
+            f"vs the {self.cfg.risk.risk_per_trade_pct:.2f}% target "
+            f"(ceiling {self.cfg.risk.max_risk_per_trade_pct:.2f}%)",
+        )
+        if not self.cfg.risk.min_lot_fallback:
+            self._event(
+                "warn",
+                "min_lot_fallback is off, so every entry will be blocked at "
+                "this bankroll - raise the bankroll or enable the fallback",
+            )
 
     async def _housekeeping(self) -> None:
         """Runs once a second: closes bars in a quiet market, expires orders."""
@@ -361,7 +411,11 @@ class Trader:
         self._event(
             "entry",
             f"entering {side.value} {sizing.qty:g} @~{sig.price:.2f} "
-            f"(risk ${sizing.risk_amount:.0f}, stop {stop:.2f}, score {sig.score:+.2f})",
+            f"(${sizing.notional:,.0f} notional, {sizing.leverage:.2f}x, "
+            f"risking ${sizing.qty * sizing.stop_distance:,.2f} = "
+            f"{sizing.actual_risk_pct:.2f}% of equity"
+            f"{' · ' + sizing.cap_applied if sizing.cap_applied else ''}, "
+            f"stop {stop:.2f}, score {sig.score:+.2f})",
         )
         if intent.done and intent.filled_qty <= 0:
             self._entry_ctx = None
@@ -553,6 +607,16 @@ class Trader:
         candles = self.aggregator.series(candle_count)
         equity_curve = self.portfolio.equity_curve[-2000:]
 
+        sizing_preview = None
+        if self.last_signal and self.last_book and pos is None and self.last_signal.atr > 0:
+            side = Side.BUY if self.last_signal.score >= 0 else Side.SELL
+            sizing_preview = self.risk.size_position(
+                equity=self.portfolio.equity, side=side,
+                price=self.last_book.mid or self.last_signal.price,
+                atr=self.last_signal.atr, book=self.last_book,
+            ).to_dict()
+            sizing_preview["side"] = side.value
+
         exit_estimate = None
         if pos is not None and book is not None and book.bids and book.asks:
             est = walk_book(book, pos.side.opposite, pos.qty,
@@ -582,6 +646,7 @@ class Trader:
             "portfolio": self.portfolio.to_dict(),
             "position_mgmt": self.positions.to_dict(pos),
             "exit_estimate": exit_estimate,
+            "sizing_preview": sizing_preview,
             "risk": self.risk.to_dict(),
             "stats": full_stats(
                 self.portfolio.trades, equity_curve, self.portfolio.start_equity,

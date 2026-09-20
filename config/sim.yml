@@ -52,7 +52,7 @@ signal:
   min_depth_usd: 150000
 
 risk:
-  start_equity: 10000
+  start_equity: 10000   # the offline demo is not constrained by venue minimums
   risk_per_trade_pct: 0.5
   max_position_pct: 100
   leverage_cap: 3

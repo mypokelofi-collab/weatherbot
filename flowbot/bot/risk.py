@@ -41,6 +41,7 @@ class SizingResult:
     notional: float = 0.0
     leverage: float = 0.0
     cap_applied: str = ""
+    actual_risk_pct: float = 0.0     # what this size really risks, after rounding
     liquidity_qty: float = 0.0
     expected_slippage_bps: float = 0.0
     expected_cost: float = 0.0
@@ -56,6 +57,7 @@ class SizingResult:
             "notional": round(self.notional, 2),
             "leverage": round(self.leverage, 3),
             "cap_applied": self.cap_applied,
+            "actual_risk_pct": round(self.actual_risk_pct, 3),
             "liquidity_qty": round(self.liquidity_qty, 6),
             "expected_slippage_bps": round(self.expected_slippage_bps, 3),
             "expected_cost": round(self.expected_cost, 2),
@@ -216,8 +218,35 @@ class RiskManager:
                 cap = "book liquidity"
 
         qty = self.instrument.round_qty(qty)
-        if qty <= 0:
-            res.reason = "size rounds to zero at the venue lot size"
+        floor_qty = self.instrument.smallest_tradable(price)
+
+        if qty < floor_qty:
+            if not cfg.min_lot_fallback:
+                res.reason = (
+                    f"risk-based size {qty:g} is below the venue minimum "
+                    f"{floor_qty:g} ({self.instrument.min_notional:g} notional)"
+                )
+                return res
+            # Take the smallest order the venue accepts, and be explicit about
+            # the risk that forces onto a small bankroll.
+            qty = floor_qty
+            cap = "venue minimum lot"
+
+        implied_risk = qty * res.stop_distance
+        res.actual_risk_pct = implied_risk / equity * 100.0 if equity else 0.0
+        if res.actual_risk_pct > cfg.max_risk_per_trade_pct:
+            res.reason = (
+                f"venue minimum {qty:g} (${qty * price:,.0f}) would risk "
+                f"{res.actual_risk_pct:.2f}% of equity, above the "
+                f"{cfg.max_risk_per_trade_pct:.2f}% ceiling"
+            )
+            return res
+
+        if qty * price > hard_cap * 1.0001:
+            res.reason = (
+                f"venue minimum ${qty * price:,.0f} exceeds the position cap "
+                f"${hard_cap:,.0f} ({cfg.leverage_cap:g}x on ${equity:,.0f})"
+            )
             return res
 
         ok, why = self.instrument.is_tradable(qty, price)
@@ -266,5 +295,7 @@ class RiskManager:
                 "max_trades_per_day": self.cfg.max_trades_per_day,
                 "leverage_cap": self.cfg.leverage_cap,
                 "allow_short": self.cfg.allow_short,
+                "max_risk_per_trade_pct": self.cfg.max_risk_per_trade_pct,
+                "min_lot_fallback": self.cfg.min_lot_fallback,
             },
         }

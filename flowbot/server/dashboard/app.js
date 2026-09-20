@@ -359,7 +359,22 @@ function renderPosition() {
     add('state', 'flat — waiting for a signal');
     add('next bar in', duration(s.next_bar_in_ms || 0));
     add('entry threshold', `±${(s.config?.signal?.entry_threshold ?? 0).toFixed(2)}`);
-    add('risk per trade', `${s.config?.risk?.risk_per_trade_pct}% (${fmtUsd((s.portfolio?.equity || 0) * (s.config?.risk?.risk_per_trade_pct || 0) / 100)})`);
+    add('risk target', `${s.config?.risk?.risk_per_trade_pct}% (${fmtUsd((s.portfolio?.equity || 0) * (s.config?.risk?.risk_per_trade_pct || 0) / 100)})`);
+
+    // What the next entry would actually be, sized against the live book -
+    // including the risk the venue's minimum order forces on a small account.
+    const sp = s.sizing_preview;
+    if (sp) {
+      if (sp.ok) {
+        add('next size', `${sp.qty} ${s.instrument?.base || 'BTC'} · ${fmtUsd(sp.notional, 0)} · ${sp.leverage.toFixed(1)}x`);
+        add('would risk', `${sp.actual_risk_pct.toFixed(2)}% (${fmtUsd(sp.risk_amount)})`,
+            sp.actual_risk_pct > (s.config?.risk?.risk_per_trade_pct || 0) * 1.5 ? 'neg' : '');
+        if (sp.cap_applied) add('size capped by', sp.cap_applied);
+        add('entry would cost', `${sp.expected_slippage_bps.toFixed(2)}bps`);
+      } else {
+        add('next size', sp.reason, 'neg');
+      }
+    }
     add('trades today', `${s.risk?.day?.trades || 0} / ${s.config?.risk?.max_trades_per_day}`);
     return;
   }

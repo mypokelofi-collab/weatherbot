@@ -8,6 +8,7 @@ from flowbot.bot.portfolio import Portfolio
 from flowbot.bot.positions import PositionManager, effective_stop
 from flowbot.bot.risk import RiskManager
 from flowbot.core.config import ExecConfig, RiskConfig
+from flowbot.core.instrument import Instrument
 from flowbot.core.types import ClosedTrade, Fill, Liquidity, Position, Side
 from tests.conftest import make_book
 
@@ -53,11 +54,17 @@ def test_thin_book_caps_the_position(instrument):
         assert res.qty <= 0.025 + 1e-9        # half of the 0.05 available
 
 
-def test_size_rejects_when_it_rounds_below_venue_minimum(instrument):
-    r = rm(instrument, risk_per_trade_pct=0.0001)
+def test_tiny_risk_never_produces_a_size_the_venue_would_reject(instrument):
+    """Sub-minimum sizing resolves to the venue minimum or to nothing - never
+    to an order that would bounce."""
+    r = rm(instrument, risk_per_trade_pct=0.0001, min_lot_fallback=True)
     res = r.size_position(100, Side.BUY, 64_000, atr=500, book=make_book())
-    assert not res.ok
-    assert "min" in res.reason or "zero" in res.reason
+    if res.ok:
+        assert res.qty >= instrument.smallest_tradable(64_000)
+        assert res.cap_applied == "venue minimum lot"
+        assert instrument.is_tradable(res.qty, 64_000)[0]
+    else:
+        assert "minimum" in res.reason or "ceiling" in res.reason
 
 
 def test_daily_loss_limit_blocks_new_entries(instrument):
@@ -243,3 +250,87 @@ def test_drawdown_tracks_the_peak():
     assert p.peak_equity == pytest.approx(10_100)
     p.set_mark(64_500, 20_000)
     assert p.drawdown == pytest.approx((10_050 - 10_100) / 10_100)
+
+
+# ------------------------------------------- small accounts vs venue minimums
+
+def perp_instrument() -> Instrument:
+    """Binance USDⓈ-M BTCUSDT: 0.001 lot step, $100 minimum notional."""
+    return Instrument(symbol="BTCUSDT", tick_size=0.1, step_size=0.001,
+                      min_qty=0.001, min_notional=100.0, contract="perp")
+
+
+def test_smallest_tradable_respects_both_venue_filters():
+    perp = perp_instrument()
+    # At $70k the $100 notional needs 0.00143 BTC, which rounds up to 0.002.
+    assert perp.smallest_tradable(70_000) == pytest.approx(0.002)
+    # At $200k the lot step is the binding filter instead.
+    assert perp.smallest_tradable(200_000) == pytest.approx(0.001)
+    assert perp.round_qty_up(0.0011) == pytest.approx(0.002)
+    assert perp.round_qty_up(0.002) == pytest.approx(0.002)
+
+
+def test_small_account_takes_the_venue_minimum_and_reports_the_real_risk():
+    perp = perp_instrument()
+    r = RiskManager(
+        RiskConfig(start_equity=50, risk_per_trade_pct=0.5,
+                   min_lot_fallback=True, max_risk_per_trade_pct=4.0,
+                   max_position_pct=300, leverage_cap=3),
+        ExecConfig(), perp,
+    )
+    price, atr = 70_000.0, 245.0            # 0.35% ATR
+    res = r.size_position(50, Side.BUY, price, atr, make_book(mid=price, size=5.0))
+
+    assert res.ok
+    assert res.qty == pytest.approx(0.002)
+    assert res.cap_applied == "venue minimum lot"
+    # The honest number: not the 0.5% target, but what the minimum lot forces.
+    assert res.actual_risk_pct == pytest.approx(0.002 * 1.6 * atr / 50 * 100, rel=1e-6)
+    assert 1.0 < res.actual_risk_pct < 2.0
+    assert res.leverage > 2.0
+
+
+def test_small_account_refuses_when_the_minimum_lot_risks_too_much():
+    perp = perp_instrument()
+    r = RiskManager(
+        RiskConfig(start_equity=50, risk_per_trade_pct=0.5,
+                   min_lot_fallback=True, max_risk_per_trade_pct=4.0,
+                   max_position_pct=300, leverage_cap=3),
+        ExecConfig(), perp,
+    )
+    # 0.9% ATR: the minimum lot would risk ~4% of a $50 account.
+    res = r.size_position(50, Side.BUY, 70_000, 630.0, make_book(mid=70_000, size=5.0))
+    assert not res.ok
+    assert "ceiling" in res.reason
+    assert res.actual_risk_pct > 4.0
+
+
+def test_fallback_can_be_turned_off():
+    perp = perp_instrument()
+    r = RiskManager(
+        RiskConfig(start_equity=50, risk_per_trade_pct=0.5, min_lot_fallback=False),
+        ExecConfig(), perp,
+    )
+    res = r.size_position(50, Side.BUY, 70_000, 245.0, make_book(mid=70_000, size=5.0))
+    assert not res.ok
+    assert "below the venue minimum" in res.reason
+
+
+def test_a_large_account_is_unaffected_by_the_fallback():
+    perp = perp_instrument()
+    r = RiskManager(RiskConfig(start_equity=100_000, risk_per_trade_pct=0.5), ExecConfig(), perp)
+    res = r.size_position(100_000, Side.BUY, 70_000, 245.0, make_book(mid=70_000, size=50.0))
+    assert res.ok
+    assert res.cap_applied != "venue minimum lot"
+    assert res.actual_risk_pct == pytest.approx(0.5, abs=0.02)
+
+
+def test_spot_venue_sizes_a_small_account_properly():
+    spot = Instrument(symbol="BTCUSDT", tick_size=0.01, step_size=0.00001,
+                      min_qty=0.00001, min_notional=5.0)
+    r = RiskManager(RiskConfig(start_equity=50, risk_per_trade_pct=0.5), ExecConfig(), spot)
+    res = r.size_position(50, Side.BUY, 70_000, 245.0, make_book(mid=70_000, size=5.0))
+    assert res.ok
+    assert res.cap_applied == ""                      # no minimum-lot fallback needed
+    assert res.actual_risk_pct == pytest.approx(0.5, abs=0.05)
+    assert res.leverage < 1.0

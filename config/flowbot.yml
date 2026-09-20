@@ -50,10 +50,27 @@ signal:
   min_depth_usd: 150000
 
 risk:
-  start_equity: 10000
+  # Paper bankroll. Everything below is sized around it.
+  start_equity: 50
+
+  # NOTE ON SMALL BANKROLLS
+  # Binance USDⓈ-M BTCUSDT has a 0.001 BTC lot step and a $100 minimum
+  # notional, so the smallest order the venue accepts is ~0.002 BTC (~$140 at
+  # $70k). On a $50 account that is ~2.8x leverage and risks 1.1-2.7% of
+  # equity depending on volatility - well above the 0.5% a larger account
+  # would use. The bot handles this explicitly rather than silently:
+  #   * min_lot_fallback  - take the venue minimum when risk-based sizing
+  #                         rounds below it
+  #   * max_risk_per_trade_pct - and refuse the trade when that minimum would
+  #                         risk more than this (happens above ~0.8% ATR)
+  # At boot the log states exactly what this bankroll can do. To get textbook
+  # 0.5% risk sizing instead, either raise start_equity to ~$1,000+, or switch
+  # data.venue to binance-spot (min notional $5) and accept long-only.
   risk_per_trade_pct: 0.5
-  max_position_pct: 100
-  leverage_cap: 3
+  min_lot_fallback: true
+  max_risk_per_trade_pct: 4.0
+  max_position_pct: 300          # must exceed 100% or the $100 venue minimum
+  leverage_cap: 3                # is unreachable on a $50 account
   allow_short: true
   stop_atr_mult: 1.6
   trail_atr_mult: 2.2
@@ -62,7 +79,9 @@ risk:
   partial_exit_pct: 50
   runner_exit_r: 4.0
   max_bars_in_trade: 24
-  daily_loss_limit_pct: 3.0
+  # A single minimum-lot loss can be ~2.7% of a $50 account, so a 3% daily
+  # cap would end the day after one trade. Scaled to the account.
+  daily_loss_limit_pct: 10.0
   max_consecutive_losses: 4
   cooldown_bars: 1
   loss_cooldown_bars: 2

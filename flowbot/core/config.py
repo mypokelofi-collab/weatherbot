@@ -98,6 +98,14 @@ class RiskConfig(BaseModel):
     leverage_cap: float = 3.0
     allow_short: bool = True
 
+    # On a small bankroll the venue's minimum order can be larger than
+    # risk-based sizing wants. Rather than silently never trading, take the
+    # venue minimum and report the risk it actually implies - but never above
+    # `max_risk_per_trade_pct`, which is the real circuit breaker for a small
+    # account.
+    min_lot_fallback: bool = True
+    max_risk_per_trade_pct: float = 2.0
+
     stop_atr_mult: float = 1.6
     trail_atr_mult: float = 2.2
     breakeven_at_r: float = 1.0
