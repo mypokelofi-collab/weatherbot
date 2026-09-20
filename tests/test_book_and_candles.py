@@ -1,0 +1,106 @@
+"""Order book replica and bar aggregation."""
+
+from __future__ import annotations
+
+import pytest
+
+from flowbot.core.types import Side, Trade
+from flowbot.data.book import OrderBook
+from flowbot.data.candles import CandleAggregator
+
+STEP = 900_000
+
+
+def test_snapshot_then_diff_updates_and_deletes():
+    b = OrderBook()
+    b.apply_snapshot([(100.0, 2.0), (99.0, 3.0)], [(101.0, 1.0), (102.0, 4.0)], seq=10, ts=1)
+    assert b.ready and b.mid == 100.5
+
+    assert b.apply_diff([(100.0, 5.0)], [(101.0, 0.0)], first_seq=11, final_seq=12, ts=2)
+    assert b.bids[100.0] == 5.0
+    assert 101.0 not in b.asks           # zero quantity deletes the level
+    assert b.best_ask == 102.0
+
+
+def test_sequence_gap_marks_book_unusable():
+    b = OrderBook()
+    b.apply_snapshot([(100.0, 1.0)], [(101.0, 1.0)], seq=10, ts=1)
+    assert b.apply_diff([], [], first_seq=11, final_seq=11, ts=2) is True
+    assert b.apply_diff([], [], first_seq=14, final_seq=15, ts=3) is False
+    assert b.ready is False
+    assert b.stats.gaps == 1
+
+
+def test_stale_diff_is_ignored_not_applied():
+    b = OrderBook()
+    b.apply_snapshot([(100.0, 1.0)], [(101.0, 1.0)], seq=20, ts=1)
+    assert b.apply_diff([(100.0, 9.9)], [], first_seq=5, final_seq=15, ts=2) is True
+    assert b.bids[100.0] == 1.0          # snapshot already contained it
+
+
+def test_walk_consumes_levels_in_price_order():
+    b = OrderBook()
+    b.apply_snapshot(
+        [(99.0, 1.0), (98.0, 1.0)],
+        [(100.0, 1.0), (101.0, 2.0)],
+        seq=1, ts=1,
+    )
+    filled, notional, levels = b.walk("ask", 2.0)
+    assert filled == 2.0
+    assert notional == pytest.approx(100.0 + 101.0)
+    assert levels == 2
+
+
+def test_imbalance_microprice_and_depth(book_factory):
+    heavy_bid = book_factory(skew=3.0)
+    assert heavy_bid.imbalance(25.0) > 0.4
+    # Microprice leans toward the thin side (the side likely to be taken).
+    assert heavy_bid.microprice > heavy_bid.mid
+    bid_usd, ask_usd = heavy_bid.depth_notional(10.0)
+    assert bid_usd > ask_usd
+
+
+def test_candles_aggregate_aggressor_split():
+    agg = CandleAggregator(STEP)
+    closed = []
+    agg.on_close(closed.append)
+    agg.add_trade(Trade(ts=STEP, price=100, qty=1, side=Side.BUY))
+    agg.add_trade(Trade(ts=STEP + 10, price=104, qty=2, side=Side.SELL))
+    agg.add_trade(Trade(ts=STEP + 20, price=98, qty=1, side=Side.BUY))
+    agg.add_trade(Trade(ts=2 * STEP + 5, price=99, qty=1, side=Side.BUY))
+
+    assert len(closed) == 1
+    bar = closed[0]
+    assert (bar.open, bar.high, bar.low, bar.close) == (100, 104, 98, 98)
+    assert bar.buy_volume == 2 and bar.sell_volume == 2
+    assert bar.delta == 0
+    assert bar.vwap == pytest.approx((100 + 104 * 2 + 98) / 4)
+
+
+def test_quiet_market_still_advances_the_bar_grid():
+    agg = CandleAggregator(STEP)
+    closed = []
+    agg.on_close(closed.append)
+    agg.add_trade(Trade(ts=STEP, price=100, qty=1, side=Side.BUY))
+    agg.add_trade(Trade(ts=4 * STEP + 1, price=110, qty=1, side=Side.BUY))
+    # One real bar plus two flat continuation bars - the grid never stretches.
+    assert [c.open_time // STEP for c in closed] == [1, 2, 3]
+    assert closed[1].volume == 0 and closed[1].close == 100
+    assert agg.current.open_time // STEP == 4
+    assert agg.current.open == 110        # first print of the bar sets the open
+
+
+def test_flush_until_closes_elapsed_bars_without_trades():
+    agg = CandleAggregator(STEP)
+    agg.add_trade(Trade(ts=STEP, price=100, qty=1, side=Side.BUY))
+    out = agg.flush_until(3 * STEP + 1)
+    assert len(out) == 2
+    assert all(c.closed for c in out)
+
+
+def test_late_print_from_a_reconnect_is_dropped():
+    agg = CandleAggregator(STEP)
+    agg.add_trade(Trade(ts=2 * STEP, price=100, qty=1, side=Side.BUY))
+    before = agg.current.volume
+    agg.add_trade(Trade(ts=STEP, price=50, qty=5, side=Side.BUY))
+    assert agg.current.volume == before

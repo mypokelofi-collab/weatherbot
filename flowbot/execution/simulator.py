@@ -55,11 +55,11 @@ class MatchingEngine:
         self,
         cfg: ExecConfig,
         instrument: Instrument,
-        book_stale_ms: int = 5_000,
+        book_stale_ms: int | None = None,
     ) -> None:
         self.cfg = cfg
         self.instrument = instrument
-        self.book_stale_ms = book_stale_ms
+        self.book_stale_ms = book_stale_ms if book_stale_ms is not None else cfg.book_stale_ms
         self.book: BookSnapshot | None = None
         self.now: int = 0
 
@@ -108,6 +108,7 @@ class MatchingEngine:
         tag: str = "",
         max_slippage_bps: float | None = None,
         timeout_s: float | None = None,
+        link_id: str = "",
     ) -> Order:
         qty = self.instrument.round_qty(qty)
         mid = self.book.mid if self.book else 0.0
@@ -120,6 +121,7 @@ class MatchingEngine:
             price=self.instrument.round_price(price, side_up=(side is Side.SELL)) if price else None,
             tif=tif,
             tag=tag,
+            link_id=link_id,
             submit_mid=mid,
             max_slippage_bps=max_slippage_bps,
             active_at=self.now + self.cfg.latency_ms,
@@ -226,7 +228,7 @@ class MatchingEngine:
         if not self.pending:
             return
         still: list[Order] = []
-        for order in self.pending:
+        for order in list(self.pending):
             if order.active_at > self.now:
                 still.append(order)
                 continue

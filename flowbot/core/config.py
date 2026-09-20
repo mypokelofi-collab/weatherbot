@@ -131,6 +131,10 @@ class ExecConfig(BaseModel):
     allow_partial_fills: bool = True
     queue_model: Literal["fifo", "optimistic"] = "fifo"
     max_book_levels_to_eat: int = 40
+    # Refuse to fill against a book older than this. Live feeds update every
+    # 100ms; a backtest over a sparsely recorded book raises it (see the
+    # backtest runner) rather than filling against stale depth.
+    book_stale_ms: int = 5_000
 
 
 class ServerConfig(BaseModel):

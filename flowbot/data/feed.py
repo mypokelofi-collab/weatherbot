@@ -65,6 +65,11 @@ class MarketFeed:
 
     venue: str = "base"
     real: bool = True
+    # `realtime` says whether the host's wall clock is a valid clock for this
+    # feed. It is for a live venue (a quiet tape still has to close bars on
+    # time); it is not for a replay or the simulator, which carry their own
+    # clock and would otherwise be fast-forwarded into the future.
+    realtime: bool = True
 
     def __init__(self, symbol: str, book_levels: int = 1000) -> None:
         self.symbol = symbol

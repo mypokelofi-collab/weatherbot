@@ -44,6 +44,7 @@ MAX_DRIFT = 1.0e-6
 class SimulatedFeed(MarketFeed):
     venue = "simulator"
     real = False
+    realtime = False        # it runs its own accelerated clock
 
     def __init__(
         self,

@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>flowbot · BTC 15m momentum</title>
+<meta name="description" content="Live paper-trading dashboard for a 15m BTC momentum bot: real book, real fills, fake money." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>📈</text></svg>" />
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <h1>flowbot</h1>
+    <span class="sub">BTC 15m momentum</span>
+  </div>
+
+  <div class="chips">
+    <span class="chip paper" title="No real orders are ever sent">PAPER MONEY</span>
+    <span class="chip" id="chipData">· data</span>
+    <span class="chip"><span class="dot" id="feedDot"></span><span id="chipVenue">venue</span></span>
+    <span class="chip">latency <b id="chipLatency">–</b></span>
+    <span class="chip">next bar <b id="chipNextBar">–</b></span>
+    <span class="chip">price <b id="chipPrice">–</b></span>
+    <span class="chip" id="chipState">idle</span>
+  </div>
+
+  <div class="controls">
+    <button id="btnPause" class="primary">Pause entries</button>
+    <button id="btnFlatten">Flatten</button>
+    <button id="btnKill" class="danger">Kill switch</button>
+    <button id="btnTheme" title="Toggle light / dark">◐</button>
+    <button id="btnCvd" title="Colour-blind safe up/down colours">CB</button>
+  </div>
+</header>
+
+<p class="banner hidden" id="banner"></p>
+
+<main>
+  <section class="tiles" id="tiles">
+    <div class="tile">
+      <div class="label">Equity</div>
+      <div class="value hero" id="tEquity">–</div>
+      <div class="delta" id="tEquityDelta">–</div>
+    </div>
+    <div class="tile">
+      <div class="label">Open position</div>
+      <div class="value" id="tPosition">flat</div>
+      <div class="delta" id="tPositionDelta">waiting for a signal</div>
+    </div>
+    <div class="tile">
+      <div class="label">Today</div>
+      <div class="value" id="tToday">–</div>
+      <div class="delta" id="tTodayDelta">–</div>
+    </div>
+    <div class="tile">
+      <div class="label">Win rate</div>
+      <div class="value" id="tWin">–</div>
+      <div class="delta" id="tWinDelta">–</div>
+    </div>
+    <div class="tile">
+      <div class="label">Expectancy</div>
+      <div class="value" id="tExpect">–</div>
+      <div class="delta" id="tExpectDelta">per trade, in R</div>
+    </div>
+    <div class="tile">
+      <div class="label">Max drawdown</div>
+      <div class="value" id="tDD">–</div>
+      <div class="delta" id="tDDDelta">–</div>
+    </div>
+    <div class="tile">
+      <div class="label">Costs paid</div>
+      <div class="value" id="tFees">–</div>
+      <div class="delta" id="tFeesDelta">–</div>
+    </div>
+    <div class="tile">
+      <div class="label">Time in market</div>
+      <div class="value" id="tExposure">–</div>
+      <div class="delta" id="tExposureDelta">–</div>
+    </div>
+  </section>
+
+  <div class="grid">
+    <!-- ------------------------- main column ------------------------- -->
+    <div class="col">
+      <section class="card">
+        <header>
+          <h2>Price · 15m · <span id="symbolLabel">BTCUSDT</span></h2>
+          <div class="legend">
+            <span><i class="key" style="background:var(--series-1)"></i>EMA fast</span>
+            <span><i class="key" style="background:var(--series-3)"></i>EMA slow</span>
+            <span><i class="key dot-key" style="background:var(--up)"></i>▲ long entry</span>
+            <span><i class="key dot-key" style="background:var(--down)"></i>▼ short entry</span>
+            <span><i class="key dot-key" style="background:var(--series-1)"></i>X exit</span>
+          </div>
+        </header>
+        <div class="chart-wrap">
+          <canvas id="priceChart"></canvas>
+          <div class="tooltip" id="priceTip"></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <header>
+          <h2>Equity &amp; drawdown</h2>
+          <span class="hint" id="equityHint">paper equity, marked at the book mid</span>
+        </header>
+        <div class="chart-wrap">
+          <canvas id="equityChart"></canvas>
+          <div class="tooltip" id="equityTip"></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <header>
+          <h2>Closed trades</h2>
+          <span class="hint" id="tradesHint"></span>
+        </header>
+        <div class="table-wrap">
+          <table id="tradesTable">
+            <thead><tr>
+              <th>#</th><th>side</th><th>qty</th><th>entry</th><th>exit</th>
+              <th>pnl</th><th>R</th><th>MFE</th><th>bars</th><th>why it closed</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <header>
+          <h2>Orders &amp; fills</h2>
+          <span class="hint" id="execHint"></span>
+        </header>
+        <div class="table-wrap">
+          <table id="ordersTable">
+            <thead><tr>
+              <th>id</th><th>time</th><th>side</th><th>type</th><th>qty</th>
+              <th>limit</th><th>filled</th><th>avg</th><th>fee</th><th>status</th><th>tag</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <header>
+          <h2>Everything else</h2>
+          <div class="tabs" id="dataTabs">
+            <button data-tab="features" aria-selected="true">Signal features</button>
+            <button data-tab="stats" aria-selected="false">Performance</button>
+            <button data-tab="exec" aria-selected="false">Execution</button>
+            <button data-tab="venue" aria-selected="false">Venue &amp; feed</button>
+          </div>
+        </header>
+        <div class="featgrid" id="dataPane"></div>
+      </section>
+    </div>
+
+    <!-- ------------------------ signal column ------------------------ -->
+    <div class="col col2">
+      <section class="card">
+        <header>
+          <h2>Signal</h2>
+          <span class="badge" id="regimeBadge">–</span>
+        </header>
+        <div class="score-row">
+          <div class="score-val" id="scoreVal">–</div>
+          <div class="score-meta">
+            <div id="scoreAction">no signal yet</div>
+            <div id="scoreBar" class="meter">
+              <div class="mid"></div>
+              <div class="fill" id="scoreFill"></div>
+              <div class="thresh" id="threshPos"></div>
+              <div class="thresh" id="threshNeg"></div>
+            </div>
+            <div class="meter-scale"><span>−1 short</span><span>0</span><span>long +1</span></div>
+          </div>
+        </div>
+        <div class="components" id="components"></div>
+        <ul class="reasons" id="reasons"></ul>
+        <ul class="reasons blockers" id="blockers"></ul>
+      </section>
+
+      <section class="card">
+        <header>
+          <h2>Position</h2>
+          <span class="hint" id="posAge"></span>
+        </header>
+        <dl class="kv" id="positionKv"></dl>
+      </section>
+
+    </div>
+
+    <!-- ------------------------ market column ------------------------ -->
+    <div class="col col3">
+      <section class="card">
+        <header>
+          <h2>Order book</h2>
+          <span class="hint" id="bookHint"></span>
+        </header>
+        <div class="meter" title="Resting notional within 10bps: bid vs ask">
+          <div class="mid"></div>
+          <div class="fill" id="imbFill"></div>
+        </div>
+        <div class="meter-scale"><span id="imbAsk">ask</span><span id="imbLabel">–</span><span id="imbBid">bid</span></div>
+        <div class="ladder" id="ladder"></div>
+      </section>
+
+      <section class="card">
+        <header>
+          <h2>Tape &amp; flow</h2>
+          <span class="hint" id="tapeHint"></span>
+        </header>
+        <canvas id="cvdSpark"></canvas>
+        <div class="meter-scale" style="margin-bottom:8px">
+          <span>cumulative delta (session)</span><span id="cvdVal">–</span>
+        </div>
+        <div class="tape" id="tape"></div>
+      </section>
+
+      <section class="card">
+        <header><h2>Activity</h2></header>
+        <div class="log" id="log"></div>
+      </section>
+
+      <section class="card">
+        <header>
+          <h2>Live parameters</h2>
+          <button id="btnApply" class="primary">Apply</button>
+        </header>
+        <div class="params" id="params"></div>
+        <p class="hint" style="margin:8px 0 0">
+          Changes take effect on the next bar close. They are not written back to the
+          config file — restart restores the deployed settings.
+        </p>
+      </section>
+    </div>
+  </div>
+</main>
+
+<footer>
+  flowbot · real market data, real order book, real fill mechanics — paper money only.
+  <span id="footerMeta"></span>
+</footer>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

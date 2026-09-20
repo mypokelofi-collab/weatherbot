@@ -41,20 +41,29 @@ class CandleAggregator:
         self._trim()
 
     def add_trade(self, trade: Trade) -> Candle | None:
-        """Feed one real print. Returns the bar that just closed, if any."""
-        open_time = bar_open(trade.ts, self.step_ms)
-        closed_bar = None
+        """Feed one real print. Returns the bar that just closed, if any.
 
+        A gap in the tape (thin venue, feed hiccup, replay of a quiet night)
+        still advances the grid: every bucket between the last bar and this
+        print is closed as a flat continuation bar, so indicator windows stay
+        aligned to real time instead of silently stretching.
+        """
+        open_time = bar_open(trade.ts, self.step_ms)
+        closed_bars: list[Candle] = []
+
+        if self.current is not None:
+            if open_time < self.current.open_time:
+                return None            # late print from a reconnect; bar is gone
+            if open_time > self.current.open_time:
+                closed_bars = self.flush_until(trade.ts)
         if self.current is None:
             self.current = self._new_bar(open_time, trade.price)
-        elif open_time > self.current.open_time:
-            closed_bar = self._close_current()
-            self.current = self._new_bar(open_time, trade.price)
-        elif open_time < self.current.open_time:
-            # Out-of-order print from a reconnect; the bar is already closed.
-            return None
 
         c = self.current
+        if c.trades == 0:
+            # First print of the bar defines the open, even if the bar was
+            # created as a flat continuation.
+            c.open = c.high = c.low = trade.price
         c.high = max(c.high, trade.price)
         c.low = min(c.low, trade.price)
         c.close = trade.price
@@ -65,7 +74,7 @@ class CandleAggregator:
             c.buy_volume += trade.qty
         else:
             c.sell_volume += trade.qty
-        return closed_bar
+        return closed_bars[-1] if closed_bars else None
 
     def flush_until(self, ts: int) -> list[Candle]:
         """Close any bar whose window has elapsed, even with no trades in it.

@@ -111,6 +111,7 @@ def recording_info(path: str | Path) -> dict:
     first_ts = last_ts = 0
     trades = books = 0
     meta: dict = {}
+    book_ts: list[int] = []
     with open_recording(path) as fh:
         for line in fh:
             try:
@@ -128,6 +129,8 @@ def recording_info(path: str | Path) -> dict:
                 trades += 1
             elif kind == "s":
                 books += 1
+                book_ts.append(ts)
+    gaps = sorted(b - a for a, b in zip(book_ts, book_ts[1:])) if len(book_ts) > 1 else []
     return {
         "path": str(path),
         "venue": meta.get("venue", "?"),
@@ -138,5 +141,9 @@ def recording_info(path: str | Path) -> dict:
         "hours": round((last_ts - first_ts) / 3_600_000, 2) if last_ts else 0,
         "trades": trades,
         "books": books,
+        # Book cadence matters: fills are only as honest as how often the
+        # depth behind them was captured.
+        "book_gap_ms_p50": gaps[len(gaps) // 2] if gaps else 0,
+        "book_gap_ms_p95": gaps[int(len(gaps) * 0.95)] if gaps else 0,
         "size_mb": round(os.path.getsize(path) / 1e6, 2),
     }

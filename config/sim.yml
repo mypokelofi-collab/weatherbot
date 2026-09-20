@@ -1,0 +1,94 @@
+# flowbot - live paper trading on real Binance USDⓈ-M market data.
+#
+# Nothing in this file can place a real order: the bot has no exchange
+# credentials and no live broker implementation. Market data, the order book,
+# fill mechanics and costs are real; the money is not.
+
+mode: paper
+log_level: INFO
+state_dir: data/state
+autostart: true
+
+data:
+  venue: simulator
+  symbol: BTCUSDT
+  interval: 15m
+  depth_limit: 1000
+  depth_speed: 100ms
+  backfill_bars: 400
+  sim_speed: 60
+  sim_seed: 7
+  record: false               # set true to capture the feed for later backtests
+  record_path: data/recordings/{venue}-{symbol}-{date}.jsonl
+  stale_feed_seconds: 90
+
+signal:
+  ema_fast: 21
+  ema_slow: 55
+  atr_period: 14
+  rsi_period: 14
+  adx_period: 14
+  donchian_period: 20
+  roc_period: 8
+  flow_bars: 6
+  warmup_bars: 80
+  weights:
+    trend: 0.22
+    trend_slope: 0.12
+    macd: 0.12
+    breakout: 0.15
+    rsi: 0.08
+    momentum_z: 0.10
+    flow: 0.13
+    book: 0.08
+  entry_threshold: 0.35
+  exit_threshold: 0.10
+  flip_threshold: 0.30
+  min_adx: 18
+  require_trend_alignment: true
+  min_atr_pct: 0.06
+  max_atr_pct: 3.0
+  max_spread_bps: 4.0
+  min_depth_usd: 150000
+
+risk:
+  start_equity: 10000
+  risk_per_trade_pct: 0.5
+  max_position_pct: 100
+  leverage_cap: 3
+  allow_short: true
+  stop_atr_mult: 1.6
+  trail_atr_mult: 2.2
+  breakeven_at_r: 1.0
+  take_profit_r: 1.8
+  partial_exit_pct: 50
+  runner_exit_r: 4.0
+  max_bars_in_trade: 24
+  daily_loss_limit_pct: 3.0
+  max_consecutive_losses: 4
+  cooldown_bars: 1
+  loss_cooldown_bars: 2
+  max_trades_per_day: 12
+  reverse_on_flip: true
+
+execution:
+  entry_order: limit          # market | limit | post_only
+  exit_order: market
+  limit_offset_ticks: 1
+  limit_timeout_s: 45
+  taker_fee_bps: 4.5          # Binance USDⓈ-M taker, no VIP tier, no BNB discount
+  maker_fee_bps: 1.8
+  latency_ms: 120
+  max_slippage_bps: 12
+  allow_partial_fills: true
+  queue_model: fifo
+
+server:
+  host: 0.0.0.0
+  port: 8032
+  title: "flowbot · BTC 15m momentum"
+  broadcast_hz: 4
+  auth_token: ""              # set to require ?token=… on the dashboard
+
+polymarket:
+  enabled: false

@@ -196,9 +196,14 @@ class Trader:
         while self.running:
             try:
                 wall = int(time.time() * 1000)
-                venue = self.venue_now or wall
-                self.aggregator.flush_until(venue)
-                self.broker.tick(venue)
+                # For a live venue the wall clock is authoritative when the
+                # tape goes quiet. For a replay or the simulator it is not -
+                # using it would fast-forward the fill engine past the data
+                # and make every book look stale.
+                venue = max(self.venue_now, wall) if self.feed.realtime else self.venue_now
+                if venue:
+                    self.aggregator.flush_until(venue)
+                    self.broker.tick(venue)
                 self._store_equity(wall)
                 self._check_feed_health(wall)
             except asyncio.CancelledError:
@@ -516,6 +521,9 @@ class Trader:
         return applied
 
     # -- state for the dashboard -------------------------------------------
+    def snapshot_next_bar_ms(self) -> int:
+        return ms_to_bar_close(self.venue_now or int(time.time() * 1000), self.step_ms)
+
     def snapshot(self, depth_levels: int = 15, candle_count: int = 240) -> dict:
         now = int(time.time() * 1000)
         venue = self.venue_now or now

@@ -175,13 +175,14 @@ class PaperBroker:
 
         tick = self.instrument.tick_size
         offset = max(0, self.cfg.limit_offset_ticks) * tick
-        last_attempt = intent.attempts >= len(plan)
+        # Exits and urgent orders have no slippage budget: refusing to fill an
+        # exit because the book got thin is how a stop becomes a disaster.
         budget = None if intent.urgency == "urgent" or "exit" in intent.tag else self.cfg.max_slippage_bps
 
         if style == "market":
             order = self.engine.submit(
                 side=intent.side, qty=intent.remaining, order_type=OrderType.MARKET,
-                tag=intent.tag, max_slippage_bps=budget if not last_attempt else budget,
+                tag=intent.tag, max_slippage_bps=budget, link_id=intent.id,
             )
         else:
             if intent.side is Side.BUY:
@@ -194,9 +195,8 @@ class PaperBroker:
             order = self.engine.submit(
                 side=intent.side, qty=intent.remaining, order_type=OrderType.LIMIT,
                 price=price, tif=tif, tag=intent.tag,
-                timeout_s=self.cfg.limit_timeout_s,
+                timeout_s=self.cfg.limit_timeout_s, link_id=intent.id,
             )
-        self._by_order[order.id] = intent.id
         intent.order_ids.append(order.id)
 
         # A rejected post-only (crossed spread) should escalate immediately
@@ -205,8 +205,8 @@ class PaperBroker:
             self._next_attempt(intent)
 
     def _handle_fill(self, order: Order, fill: Fill) -> None:
-        intent_id = self._by_order.get(order.id)
-        if intent_id:
+        intent_id = order.link_id or self._by_order.get(order.id)
+        if intent_id and intent_id in self.intents:
             intent = self.intents[intent_id]
             prev = intent.avg_price * intent.filled_qty
             intent.filled_qty = round(intent.filled_qty + fill.qty, 10)
@@ -222,8 +222,8 @@ class PaperBroker:
     def _handle_order(self, order: Order) -> None:
         for fn in self._order_handlers:
             fn(order)
-        intent_id = self._by_order.get(order.id)
-        if not intent_id:
+        intent_id = order.link_id or self._by_order.get(order.id)
+        if not intent_id or intent_id not in self.intents:
             return
         intent = self.intents[intent_id]
         if intent.done:

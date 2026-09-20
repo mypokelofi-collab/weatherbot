@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 class ReplayFeed(MarketFeed):
     venue = "replay"
     real = True          # the data is real; only the clock is synthetic
+    realtime = False
 
     def __init__(
         self,
@@ -49,6 +50,27 @@ class ReplayFeed(MarketFeed):
 
     def on_finish(self, fn) -> None:
         self._on_finish.append(fn)
+
+    async def load_instrument(self) -> Instrument:
+        """Read the venue's trading rules from the recording header.
+
+        Without this the bot would round prices and sizes with defaults rather
+        than the grid the captured venue actually used.
+        """
+        try:
+            with open_recording(self.path) as fh:
+                for line in fh:
+                    obj = json.loads(line)
+                    if obj.get("k") != "meta":
+                        break
+                    self.symbol = obj.get("symbol", self.symbol)
+                    inst = obj.get("instrument")
+                    if inst:
+                        self.instrument = Instrument(**inst)
+                    break
+        except Exception as exc:  # noqa: BLE001
+            log.warning("could not read recording header (%s)", exc)
+        return self.instrument
 
     async def run(self) -> None:
         while True:

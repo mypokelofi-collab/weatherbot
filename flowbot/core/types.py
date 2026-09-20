@@ -331,6 +331,7 @@ class Order:
     avg_price: float = 0.0
     fees: float = 0.0
     tag: str = ""                       # why the bot sent it
+    link_id: str = ""                   # broker intent this order belongs to
     submit_mid: float = 0.0             # mid at submission, for slippage accounting
     queue_ahead: float = 0.0            # resting size ahead of us at our price
     max_slippage_bps: float | None = None   # abort rather than pay more than this
@@ -362,6 +363,7 @@ class Order:
             "avg_price": self.avg_price,
             "fees": self.fees,
             "tag": self.tag,
+            "link_id": self.link_id,
             "queue_ahead": self.queue_ahead,
             "active_at": self.active_at,
             "expire_at": self.expire_at,
