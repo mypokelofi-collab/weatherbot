@@ -304,6 +304,11 @@ class Trader:
         self.broker.set_book(snap)
         if snap.mid:
             self.portfolio.set_mark(snap.mid, snap.ts)
+            if self.aggregator.current is None:
+                # The trade tape can lag or stall on a socket that is
+                # otherwise healthy (depth flowing fine); don't let the whole
+                # signal pipeline wait on it just to open the first bar.
+                self.aggregator.bootstrap_current(snap.ts, snap.mid)
 
     def _on_feed_status(self, payload: dict) -> None:
         state = payload.get("state")

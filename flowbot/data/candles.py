@@ -40,6 +40,20 @@ class CandleAggregator:
             self.history.append(c)
         self._trim()
 
+    def bootstrap_current(self, ts: int, price: float) -> None:
+        """Open the live bar from a non-trade price (the book mid) so a bar
+        exists to close on schedule even if the trade tape is late or briefly
+        dead. `add_trade` only ever creates `current` itself, so a feed with
+        working depth but a stalled trade stream would otherwise leave the
+        bot with no bar in progress, and `flush_until`'s clock-driven close
+        never gets a bar to close in the first place. A no-op once a bar is
+        already open; the first real print still claims its own open/high/low
+        exactly as it would for any other flat-continuation bar.
+        """
+        if self.current is not None:
+            return
+        self.current = self._new_bar(bar_open(ts, self.step_ms), price)
+
     def add_trade(self, trade: Trade) -> Candle | None:
         """Feed one real print. Returns the bar that just closed, if any.
 

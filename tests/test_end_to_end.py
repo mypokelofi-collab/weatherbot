@@ -15,6 +15,8 @@ from flowbot.data.recorder import Recorder, recording_info
 from flowbot.data.replay import ReplayFeed
 from flowbot.data.simulated import SimulatedFeed
 
+from tests.conftest import make_book
+
 
 def backtest_config(recording, tmp_path) -> AppConfig:
     cfg = AppConfig()
@@ -197,3 +199,28 @@ async def test_a_blocked_entry_does_not_wedge_the_bot(tmp_path):
     # from it - a stale-looking book silently blocks every fill.
     assert snap["book"] is not None
     assert snap["venue_now"] - snap["book"]["ts"] < cfg.execution.book_stale_ms
+
+
+def test_a_stalled_trade_tape_does_not_wedge_bar_close(tmp_path):
+    """Regression: a venue that streams depth but withholds trades (observed
+    live against Binance - REST confirmed real prints the whole time, the
+    websocket delivered none) must not leave the bot waiting on the first
+    trade forever just to open its first bar.
+    """
+    cfg = AppConfig()
+    cfg.state_dir = str(tmp_path / "state")
+    cfg.data.venue = "simulator"
+
+    feed = build_feed(cfg.data)
+    trader = Trader(cfg, feed, EventBus(), store=None)
+    assert trader.aggregator.current is None    # nothing has happened yet
+
+    trader._on_book(make_book(ts=1_000, mid=64_000.0))
+    assert trader.aggregator.current is not None
+    assert trader.aggregator.current.close == 64_000.0
+
+    # A real print inside the same bar still claims open/high/low itself -
+    # the book-mid bootstrap is only ever a placeholder.
+    from flowbot.core.types import Side, Trade
+    trader._on_trade(Trade(ts=1_050, price=64_010.0, qty=0.01, side=Side.BUY))
+    assert trader.aggregator.current.open == 64_010.0

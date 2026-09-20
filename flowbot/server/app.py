@@ -130,39 +130,70 @@ def create_app(trader: Trader, cfg: AppConfig) -> FastAPI:
         return JSONResponse(tick_payload(trader))
 
     @app.get("/api/trades")
-    async def trades(limit: int = 200) -> JSONResponse:
+    async def trades(
+        request: Request, limit: int = 200, token_q: str | None = Query(None, alias="token")
+    ) -> JSONResponse:
+        check_auth(token_q, request.headers.get("authorization"))
         return JSONResponse([t.to_dict() for t in trader.portfolio.trades[-limit:]])
 
     @app.get("/api/orders")
-    async def orders(limit: int = 100) -> JSONResponse:
+    async def orders(
+        request: Request, limit: int = 100, token_q: str | None = Query(None, alias="token")
+    ) -> JSONResponse:
+        check_auth(token_q, request.headers.get("authorization"))
         return JSONResponse([o.to_dict() for o in trader.broker.recent_orders(limit)])
 
     @app.get("/api/signal")
-    async def signal() -> JSONResponse:
+    async def signal(
+        request: Request, token_q: str | None = Query(None, alias="token")
+    ) -> JSONResponse:
+        check_auth(token_q, request.headers.get("authorization"))
         sig = trader.last_signal
         history = [s.to_dict() for s in trader.engine.history[-80:]]
         return JSONResponse({"current": sig.to_dict() if sig else None, "history": history})
 
     @app.get("/api/book")
-    async def book(levels: int = 25) -> JSONResponse:
+    async def book(
+        request: Request, levels: int = 25, token_q: str | None = Query(None, alias="token")
+    ) -> JSONResponse:
+        check_auth(token_q, request.headers.get("authorization"))
         b = trader.last_book
         return JSONResponse(b.to_dict(levels) if b else {})
 
     @app.get("/api/events")
-    async def events(limit: int = 100) -> JSONResponse:
+    async def events(
+        request: Request, limit: int = 100, token_q: str | None = Query(None, alias="token")
+    ) -> JSONResponse:
+        check_auth(token_q, request.headers.get("authorization"))
         return JSONResponse(trader.events.tail(limit))
 
     @app.get("/api/polymarket")
-    async def polymarket() -> JSONResponse:
+    async def polymarket(
+        request: Request, token_q: str | None = Query(None, alias="token")
+    ) -> JSONResponse:
+        check_auth(token_q, request.headers.get("authorization"))
         pipe = trader.polymarket
         return JSONResponse(pipe.state() if pipe else {"enabled": False})
 
     @app.get("/api/config")
-    async def config() -> JSONResponse:
-        return JSONResponse(cfg.to_dict())
+    async def config(
+        request: Request, token_q: str | None = Query(None, alias="token")
+    ) -> JSONResponse:
+        check_auth(token_q, request.headers.get("authorization"))
+        payload = cfg.to_dict()
+        # Never echo the dashboard secret back over the wire, authenticated or not -
+        # the UI has no use for it and it would defeat the token gate on every
+        # other endpoint the moment anyone reads this one.
+        server_section = payload.get("server")
+        if isinstance(server_section, dict) and server_section.get("auth_token"):
+            server_section["auth_token"] = "***"
+        return JSONResponse(payload)
 
     @app.get("/api/sessions")
-    async def sessions() -> JSONResponse:
+    async def sessions(
+        request: Request, token_q: str | None = Query(None, alias="token")
+    ) -> JSONResponse:
+        check_auth(token_q, request.headers.get("authorization"))
         if not trader.store:
             return JSONResponse([])
         return JSONResponse(trader.store.sessions())

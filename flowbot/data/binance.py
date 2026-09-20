@@ -32,6 +32,10 @@ from .feed import MarketFeed
 
 log = logging.getLogger(__name__)
 
+
+class TradeStreamStalled(ConnectionError):
+    """Depth kept flowing but no aggTrade print arrived for TRADE_STALL_MS."""
+
 SPOT = {
     "rest": "https://api.binance.com",
     "ws": "wss://stream.binance.com:9443/stream",
@@ -51,6 +55,15 @@ FUTURES = {
 class BinanceFeed(MarketFeed):
     venue = "binance"
     real = True
+
+    # If the trade tape stays silent this long on a socket that is otherwise
+    # alive (depth still flowing), Binance is withholding aggTrade on that
+    # specific connection - observed happening on BTCUSDT while the REST API
+    # confirmed real trades were printing several times a second the whole
+    # time. A fresh socket has cleared it every time this has been seen, so
+    # treat it as a feed fault and let `_supervise` reconnect with its normal
+    # backoff, same as a dropped connection.
+    TRADE_STALL_MS = 30_000
 
     def __init__(
         self,
@@ -192,6 +205,18 @@ class BinanceFeed(MarketFeed):
                     self._handle_trade(data)
                 elif etype == "depthUpdate":
                     self._handle_depth(data)
+
+                if self._trade_stream_stalled():
+                    raise TradeStreamStalled(
+                        f"no trade prints for {self.TRADE_STALL_MS / 1000:.0f}s "
+                        "while depth kept flowing"
+                    )
+
+    def _trade_stream_stalled(self) -> bool:
+        baseline = self.health.last_trade_ts or self.health.connected_since
+        if not baseline:
+            return False
+        return int(time.time() * 1000) - baseline > self.TRADE_STALL_MS
 
     def _handle_trade(self, d: dict) -> None:
         # m = true means the buyer was the maker, i.e. a seller hit the bid.

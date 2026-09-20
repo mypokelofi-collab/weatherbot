@@ -134,6 +134,31 @@ def test_auth_token_gates_the_api(app_config):
         ).status_code == 200
         assert client.get("/api/health").status_code == 200   # health stays open
 
+        # Every other read endpoint must gate the same way - none of these are
+        # allowed to leak trades, orders, signal history, book depth, events,
+        # the polymarket state, config or session history to an unauthenticated
+        # caller just because /api/state happens to be the one everyone checks.
+        gated = [
+            "/api/trades", "/api/orders", "/api/signal", "/api/book",
+            "/api/events", "/api/polymarket", "/api/config", "/api/sessions",
+        ]
+        for path in gated:
+            assert client.get(path).status_code == 401, path
+            assert client.get(f"{path}?token=s3cret").status_code == 200, path
+
+
+def test_config_endpoint_never_echoes_the_auth_token(app_config):
+    # /api/config is public read surface once a caller is authenticated for
+    # dashboard use; it must still never hand the secret back, because the
+    # moment it does, the token gate on every other endpoint is worthless.
+    cfg = app_config
+    cfg.server.auth_token = "s3cret"
+    feed = build_feed(cfg.data)
+    trader = Trader(cfg, feed, EventBus(), store=None)
+    with TestClient(create_app(trader, cfg)) as client:
+        body = client.get("/api/config?token=s3cret").json()
+        assert body["server"]["auth_token"] != "s3cret"
+
 
 # ------------------------------------------------------------------ config
 

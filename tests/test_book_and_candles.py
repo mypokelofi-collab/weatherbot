@@ -104,3 +104,37 @@ def test_late_print_from_a_reconnect_is_dropped():
     before = agg.current.volume
     agg.add_trade(Trade(ts=STEP, price=50, qty=5, side=Side.BUY))
     assert agg.current.volume == before
+
+
+def test_bootstrap_current_opens_a_bar_without_a_trade():
+    # A depth-only feed (trade tape stalled or just slow to arrive) must
+    # still get a bar in progress, or the clock-driven flush in `_housekeeping`
+    # has nothing to close and the whole signal pipeline stalls forever.
+    agg = CandleAggregator(STEP)
+    agg.bootstrap_current(STEP + 5, 200.0)
+    assert agg.current is not None
+    assert agg.current.open_time // STEP == 1
+    assert (agg.current.open, agg.current.high, agg.current.low, agg.current.close) == (
+        200.0, 200.0, 200.0, 200.0,
+    )
+    assert agg.current.trades == 0
+
+
+def test_bootstrap_current_is_a_noop_once_a_bar_is_open():
+    agg = CandleAggregator(STEP)
+    agg.add_trade(Trade(ts=STEP, price=100, qty=1, side=Side.BUY))
+    agg.bootstrap_current(STEP + 5, 999.0)   # must not clobber the real bar
+    assert agg.current.open == 100
+
+
+def test_first_real_trade_reclaims_a_bootstrapped_bar():
+    agg = CandleAggregator(STEP)
+    closed = []
+    agg.on_close(closed.append)
+    agg.bootstrap_current(STEP, 200.0)       # book-mid placeholder
+    agg.add_trade(Trade(ts=STEP + 5, price=205.0, qty=1, side=Side.BUY))
+    # The first print still defines open/high/low, exactly as it would for
+    # any other flat-continuation bar - the bootstrap price is discarded.
+    assert (agg.current.open, agg.current.high, agg.current.low) == (205.0, 205.0, 205.0)
+    agg.flush_until(2 * STEP + 1)
+    assert closed[0].close == 205.0

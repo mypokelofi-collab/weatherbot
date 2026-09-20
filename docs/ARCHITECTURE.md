@@ -92,6 +92,19 @@ or the offline simulator.
 
 Things that are *modelled*, and therefore approximations, are listed in §7.
 
+**A trade tape that goes quiet is a feed fault, not a market condition.**
+Observed live on BTCUSDT futures: the depth stream kept flowing normally
+while the venue's aggTrade stream delivered zero prints for over an hour on
+an otherwise-healthy socket, confirmed against the REST API printing real
+trades the whole time. `BinanceFeed` now watches for exactly this
+(`TRADE_STALL_MS`, `data/binance.py`) and forces a reconnect, the same as it
+would for a dropped connection - a fresh socket has cleared it every time
+this has been seen. Separately, `CandleAggregator.bootstrap_current`
+(`data/candles.py`) opens the live bar from the book mid rather than waiting
+on the first trade, so a stalled or merely slow-to-arrive trade tape can no
+longer leave the aggregator with no bar in progress and nothing for the
+clock-driven close in `_housekeeping` to close.
+
 ---
 
 ## 3. The signal system
