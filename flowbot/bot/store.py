@@ -12,6 +12,7 @@ question about what was flushed when the process died.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import sqlite3
@@ -64,19 +65,79 @@ CREATE INDEX IF NOT EXISTS idx_signals_bar ON signals(bar_time);
 """
 
 
+def _never_fatal(fn):
+    """A ledger problem must never reach the trading loop.
+
+    The bot can survive losing its bookkeeping; it cannot survive the
+    exception from that loss unwinding through the market-data callback that
+    was writing the row. Disk full, a locked database, a volume unmounted
+    under a running container - all plausible on a real server, none of them a
+    reason to stop managing an open position. So writes degrade to a warning,
+    and persistence switches itself off after a run of failures rather than
+    logging on every tick.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if self._db is None:
+            return None
+        try:
+            result = fn(self, *args, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - deliberately broad
+            self.write_failures += 1
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            if self.write_failures == 1 or self.write_failures % 50 == 0:
+                log.error(
+                    "ledger write failed (%d in a row): %s - trading continues, "
+                    "this session's audit trail is incomplete",
+                    self.write_failures, self.last_error,
+                )
+            if self.write_failures >= self.max_write_failures:
+                log.error(
+                    "disabling the ledger after %d consecutive failures; "
+                    "fix the database and restart to resume recording",
+                    self.write_failures,
+                )
+                try:
+                    self._db.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                self._db = None
+                self.enabled = False
+            return None
+        else:
+            self.write_failures = 0
+            return result
+
+    return wrapper
+
+
 class Store:
     def __init__(self, path: str | Path, enabled: bool = True) -> None:
         self.path = Path(path)
         self.enabled = enabled
         self.session_id = 0
+        self.write_failures = 0
+        self.max_write_failures = 25
+        self.last_error = ""
         self._db: sqlite3.Connection | None = None
         if enabled:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self._db = sqlite3.connect(str(self.path), check_same_thread=False)
-            self._db.executescript(SCHEMA)
-            self._db.commit()
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                self._db = sqlite3.connect(str(self.path), check_same_thread=False)
+                self._db.executescript(SCHEMA)
+                self._db.commit()
+            except Exception as exc:  # noqa: BLE001
+                log.error(
+                    "could not open the ledger at %s (%s); the bot will trade "
+                    "without persistence", self.path, exc,
+                )
+                self._db = None
+                self.enabled = False
+                self.last_error = str(exc)
 
     # -- lifecycle ---------------------------------------------------------
+    @_never_fatal
     def start_session(self, meta: dict[str, Any]) -> int:
         if not self._db:
             return 0
@@ -96,11 +157,24 @@ class Store:
 
     def close(self) -> None:
         if self._db:
-            self._db.commit()
-            self._db.close()
-            self._db = None
+            try:
+                self._db.commit()
+                self._db.close()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("error closing the ledger: %s", exc)
+            finally:
+                self._db = None
+
+    def health(self) -> dict:
+        return {
+            "enabled": self.enabled and self._db is not None,
+            "path": str(self.path),
+            "write_failures": self.write_failures,
+            "last_error": self.last_error,
+        }
 
     # -- writes ------------------------------------------------------------
+    @_never_fatal
     def record_order(self, order: Order) -> None:
         if not self._db:
             return
@@ -121,6 +195,7 @@ class Store:
         )
         self._db.commit()
 
+    @_never_fatal
     def record_fill(self, fill: Fill) -> None:
         if not self._db:
             return
@@ -135,6 +210,7 @@ class Store:
         )
         self._db.commit()
 
+    @_never_fatal
     def record_trade(self, t: ClosedTrade) -> None:
         if not self._db:
             return
@@ -152,6 +228,7 @@ class Store:
         )
         self._db.commit()
 
+    @_never_fatal
     def record_equity(self, ts: int, equity: float, realized: float,
                       unrealized: float, mark: float, position: dict | None) -> None:
         if not self._db:
@@ -164,6 +241,7 @@ class Store:
         )
         self._db.commit()
 
+    @_never_fatal
     def record_signal(self, sig: Signal) -> None:
         if not self._db:
             return
@@ -177,6 +255,7 @@ class Store:
         )
         self._db.commit()
 
+    @_never_fatal
     def record_event(self, kind: str, message: str, ts: int, payload: dict | None = None) -> None:
         if not self._db:
             return
@@ -187,6 +266,7 @@ class Store:
         self._db.commit()
 
     # -- reads -------------------------------------------------------------
+    @_never_fatal
     def load_trades(self, session_id: int | None = None) -> list[ClosedTrade]:
         if not self._db:
             return []
@@ -208,6 +288,7 @@ class Store:
             for r in rows
         ]
 
+    @_never_fatal
     def load_equity(self, session_id: int | None = None, limit: int = 5000) -> list[tuple[int, float]]:
         if not self._db:
             return []
@@ -218,6 +299,7 @@ class Store:
         ).fetchall()
         return list(reversed([(int(r[0]), float(r[1])) for r in rows]))
 
+    @_never_fatal
     def last_session(self) -> dict | None:
         if not self._db:
             return None
@@ -230,6 +312,7 @@ class Store:
         return {"id": row[0], "started_at": row[1], "venue": row[2],
                 "symbol": row[3], "start_equity": row[4]}
 
+    @_never_fatal
     def sessions(self, limit: int = 20) -> list[dict]:
         if not self._db:
             return []
@@ -243,6 +326,7 @@ class Store:
             for r in rows
         ]
 
+    @_never_fatal
     def recent_events(self, limit: int = 100) -> list[dict]:
         if not self._db:
             return []

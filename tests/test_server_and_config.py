@@ -191,3 +191,41 @@ def test_live_broker_refuses_to_exist(instrument):
 
     with pytest.raises(NotImplementedError):
         LiveBroker()
+
+
+# ------------------------------------------------- the ledger is never fatal
+
+def test_a_broken_ledger_never_reaches_the_trading_loop(tmp_path):
+    """Regression: a SQLite write error escaped the store and killed the
+    market-data feed. Bookkeeping may fail; trading may not stop."""
+    from flowbot.bot.store import Store
+    from flowbot.core.types import Fill, Liquidity, Side
+
+    store = Store(tmp_path / "ledger.sqlite")
+    assert store.start_session({"started_at": 1, "venue": "test"}) == 1
+
+    # Simulate the database going away under a running bot (disk full, volume
+    # unmounted, file deleted) - every subsequent write must be swallowed.
+    store._db.close()
+
+    fill = Fill(ts=1, order_id="o1", side=Side.BUY, price=100, qty=1,
+                fee=0.1, liquidity=Liquidity.TAKER)
+    for _ in range(30):
+        store.record_fill(fill)          # must not raise
+        store.record_event("tick", "still trading", 1)
+
+    assert store.write_failures == 0 or not store.enabled
+    assert store.health()["enabled"] is False     # it switched itself off
+    assert store.record_equity(1, 1.0, 1.0, 0.0, 100.0, None) is None
+    assert store.load_trades() is None or store.load_trades() == []
+
+
+def test_an_unopenable_ledger_still_lets_the_bot_run(tmp_path):
+    from flowbot.bot.store import Store
+
+    blocked = tmp_path / "a-file-not-a-dir"
+    blocked.write_text("x")
+    store = Store(blocked / "nested" / "ledger.sqlite")
+    assert store.enabled is False
+    assert store.health()["enabled"] is False
+    store.record_event("boot", "no persistence available", 1)   # must not raise
