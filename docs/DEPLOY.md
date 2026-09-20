@@ -35,6 +35,35 @@ Useful flags:
 
 ---
 
+## From GitHub Actions (hands-off)
+
+If you would rather not run anything locally, the repository ships
+`.github/workflows/deploy.yml`. It runs the test suite, then the same
+`scripts/deploy.sh`, from a GitHub runner — which has the outbound SSH a
+Claude Code session does not.
+
+Add four repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `VPS_HOST` | the server's IP or hostname |
+| `VPS_USER` | the SSH login, e.g. `root` |
+| `VPS_SSH_KEY` | the **private** key, whole file including the BEGIN/END lines |
+| `DASHBOARD_TOKEN` | any long random string; it gates the dashboard |
+
+Then **Actions → Deploy to VPS → Run workflow**, picking the venue and whether
+to publish the port. It is manual-trigger only — nothing deploys on a push —
+and the run summary shows `docker compose ps` plus the last 40 log lines.
+GitHub masks the secret values in the logs.
+
+Generate a deploy key that only touches this server:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/flowbot_deploy -C "flowbot deploy" -N ""
+ssh-copy-id -i ~/.ssh/flowbot_deploy.pub root@your-vps
+cat ~/.ssh/flowbot_deploy          # this is what goes in VPS_SSH_KEY
+```
+
 ## By hand, if you prefer
 
 ```bash

@@ -26,7 +26,7 @@ make run                        # live Binance USDⓈ-M data, paper money
 Then open **http://localhost:8032**.
 
 ```bash
-make test                       # 122 tests
+make test                       # 128 tests
 make deploy HOST=user@your-vps  # docker compose on a VPS, dashboard on :8032
 ```
 

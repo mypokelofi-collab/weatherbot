@@ -1,0 +1,127 @@
+# Deploy flowbot to the VPS from GitHub's runners.
+#
+# This exists because a Claude Code session has no outbound SSH, so the deploy
+# has to run somewhere with real network access. GitHub's runners have it, and
+# the key lives in repository secrets - nobody has to paste it into a chat.
+#
+# Required secrets (Settings -> Secrets and variables -> Actions):
+#   VPS_HOST          65.108.157.122
+#   VPS_USER          root  (or whatever your login is)
+#   VPS_SSH_KEY       the PRIVATE key, whole file including BEGIN/END lines
+#   DASHBOARD_TOKEN   any long random string; it gates the dashboard
+#
+# Then: Actions -> "Deploy to VPS" -> Run workflow.
+#
+# Manual trigger only. Nothing deploys on a push.
+
+name: Deploy to VPS
+
+on:
+  workflow_dispatch:
+    inputs:
+      venue:
+        description: "Market data venue"
+        type: choice
+        default: binance-futures
+        options: [binance-futures, binance-spot, coinbase, simulator]
+      bind:
+        description: "Publish the dashboard on 0.0.0.0 (public, token-gated) or 127.0.0.1 (SSH tunnel only)"
+        type: choice
+        default: "0.0.0.0"
+        options: ["0.0.0.0", "127.0.0.1"]
+      port:
+        description: "Host port for the dashboard"
+        default: "8032"
+      path:
+        description: "Install directory on the VPS"
+        default: "/opt/flowbot"
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test before deploying
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+
+  deploy:
+    name: Deploy
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the secrets are set
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          USER_NAME: ${{ secrets.VPS_USER }}
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+          TOKEN: ${{ secrets.DASHBOARD_TOKEN }}
+        run: |
+          missing=""
+          [ -n "$HOST" ]      || missing="$missing VPS_HOST"
+          [ -n "$USER_NAME" ] || missing="$missing VPS_USER"
+          [ -n "$KEY" ]       || missing="$missing VPS_SSH_KEY"
+          [ -n "$TOKEN" ]     || missing="$missing DASHBOARD_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "::error::missing repository secrets:$missing"
+            exit 1
+          fi
+
+      - name: Load the SSH key
+        env:
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+          HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Pin the host key so the first connection is not trust-on-first-use.
+          ssh-keyscan -T 15 -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          cat >> ~/.ssh/config <<CFG
+          Host $HOST
+            User ${{ secrets.VPS_USER }}
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          CFG
+          chmod 600 ~/.ssh/config
+
+      - name: Deploy
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          USER_NAME: ${{ secrets.VPS_USER }}
+          TOKEN: ${{ secrets.DASHBOARD_TOKEN }}
+        run: |
+          ./scripts/deploy.sh "$USER_NAME@$HOST" \
+            --path  "${{ inputs.path }}" \
+            --port  "${{ inputs.port }}" \
+            --bind  "${{ inputs.bind }}" \
+            --venue "${{ inputs.venue }}" \
+            --token "$TOKEN"
+
+      - name: Report what is running
+        if: always()
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          USER_NAME: ${{ secrets.VPS_USER }}
+        run: |
+          echo "### flowbot deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          ssh -o BatchMode=yes "$USER_NAME@$HOST" \
+            "cd '${{ inputs.path }}' && docker compose ps && docker compose logs --tail 40" \
+            >> "$GITHUB_STEP_SUMMARY" 2>&1 || echo "could not reach the host" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "Dashboard: http://${HOST}:${{ inputs.port }}/?token=<DASHBOARD_TOKEN>" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Clean up the key
+        if: always()
+        run: rm -f ~/.ssh/id_deploy ~/.ssh/config
