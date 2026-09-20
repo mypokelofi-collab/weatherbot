@@ -1,0 +1,16 @@
+[Unit]
+Description=flowbot pull-based deploy agent
+Documentation=https://github.com/mypokelofi-collab/weatherbot/blob/main/docs/DEPLOY.md
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/flowbot
+EnvironmentFile=-/etc/flowbot-autodeploy.env
+ExecStart=/opt/flowbot/scripts/autodeploy.sh
+TimeoutStartSec=900
+# A failed deploy must never take the machine's other services with it.
+Restart=no
+StandardOutput=journal
+StandardError=journal

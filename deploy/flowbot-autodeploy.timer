@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for flowbot updates every minute
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=60s
+AccuracySec=10s
+Unit=flowbot-autodeploy.service
+
+[Install]
+WantedBy=timers.target

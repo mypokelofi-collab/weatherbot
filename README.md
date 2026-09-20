@@ -28,6 +28,9 @@ Then open **http://localhost:8033**.
 ```bash
 make test                       # 128 tests
 make deploy HOST=user@your-vps  # docker compose on a VPS, dashboard on :8033
+
+# or, when you cannot reach the server, let it update itself:
+#   sudo ./scripts/install-autodeploy.sh   (run once, on the server)
 ```
 
 The simulator is clearly labelled everywhere it appears — the dashboard shows

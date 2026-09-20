@@ -35,6 +35,60 @@ Useful flags:
 
 ---
 
+## Pull-based auto-deploy (the server updates itself)
+
+Use this when whoever ships the code cannot reach the server — which is the
+normal case for an agent sandbox, a laptop behind CGNAT, or any network where
+outbound SSH is blocked. Instead of pushing to the server, the server watches
+a branch and updates itself.
+
+Install it once, on the VPS:
+
+```bash
+sudo git clone -b claude/btc-momentum-trading-bot-wqxm70 \
+  https://github.com/mypokelofi-collab/weatherbot.git /opt/flowbot
+cd /opt/flowbot && sudo ./scripts/install-autodeploy.sh
+```
+
+The installer picks a free port (8033 upward), installs Docker if missing,
+writes `.env` with a generated dashboard token, and enables a systemd timer
+that runs `scripts/autodeploy.sh` every 60 seconds. It does not stop or
+reconfigure anything already running on the host.
+
+From then on: **push to the branch, and the server is running it within a
+minute.** No inbound port, no SSH key handed out, nothing listening for
+commands — the agent only ever pulls a specific branch of a specific repo.
+
+```bash
+systemctl status flowbot-autodeploy.timer   # is the agent alive
+journalctl -u flowbot-autodeploy -n 50      # what it did last
+cat /opt/flowbot/data/deploy-status.json    # the last deploy's outcome
+systemctl disable --now flowbot-autodeploy.timer   # stop auto-updating
+```
+
+**Trust model, stated plainly:** anything committed to the watched branch runs
+on the server within a minute. That is the point of the mechanism, and it is
+the same arrangement as any CI/CD pipeline — but it means the branch is a
+production credential. Protect it, and set `FLOWBOT_BRANCH` in
+`/etc/flowbot-autodeploy.env` to a branch only trusted people can push to.
+
+### Letting the shipper see what happened
+
+Without extra setup the deploy outcome is written to
+`/opt/flowbot/data/deploy-status.json` on the server. To make it visible to
+whoever pushed the code, give the agent a GitHub fine-grained token with
+**Contents: read and write** on this repository only, in
+`/etc/flowbot-autodeploy.env`:
+
+```
+FLOWBOT_STATUS_TOKEN=github_pat_...
+```
+
+Each deploy then publishes commit, health, build log and container log to the
+`deploy-status` branch. That branch is only ever written by the agent; it
+never triggers a deploy. Revoke the token at any time — the bot keeps running,
+it just stops reporting.
+
 ## From GitHub Actions (hands-off)
 
 If you would rather not run anything locally, the repository ships
