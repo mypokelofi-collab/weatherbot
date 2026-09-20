@@ -142,6 +142,25 @@ class CandleAggregator:
     def recent(self, n: int) -> list[Candle]:
         return self.history[-n:]
 
+    def open_at(self, ts: int) -> float | None:
+        """The open price of the bar whose bucket starts at `ts`, if we have
+        one - live if it is the bar in progress, from history otherwise.
+
+        This is what makes flowbot's own feed a usable reference series for
+        anything that settles against "the price when this window began" -
+        Polymarket's short-duration BTC windows are UTC-aligned to the same
+        grid as our own 15m/5m bars, so this needs no separate price fetch.
+        """
+        bucket = bar_open(ts, self.step_ms)
+        if self.current is not None and self.current.open_time == bucket:
+            return self.current.open
+        for c in reversed(self.history):
+            if c.open_time == bucket:
+                return c.open
+            if c.open_time < bucket:
+                break
+        return None
+
     def series(self, n: int, include_open: bool = True) -> list[Candle]:
         out = self.history[-n:]
         if include_open and self.current is not None:

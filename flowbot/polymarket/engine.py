@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 
@@ -55,6 +56,11 @@ class PaperPosition:
     outcome: int | None = None      # 1 = our side won
     pnl: float = 0.0
     settle_note: str = ""
+    # True when `force_min_trades` opened this position with no organic edge.
+    # Kept out of the calibration/Brier stats entirely (see `_settle_due`) -
+    # a forecast this pipeline was told to ignore the disagreement on is not
+    # a data point about whether the model is any good.
+    forced: bool = False
 
     @property
     def stake(self) -> float:
@@ -82,6 +88,7 @@ class PaperPosition:
             "outcome": self.outcome,
             "pnl": round(self.pnl, 2),
             "settle_note": self.settle_note,
+            "forced": self.forced,
         }
 
 
@@ -126,12 +133,16 @@ class PolymarketPipeline:
         self._task: asyncio.Task | None = None
         self._spot_provider = None
         self._signal_provider = None
+        self._window_open_provider = None
 
     # -- wiring ------------------------------------------------------------
-    def bind(self, spot_provider, signal_provider) -> None:
-        """`spot_provider() -> (price, sigma_annual)`, `signal_provider() -> score`."""
+    def bind(self, spot_provider, signal_provider, window_open_provider=None) -> None:
+        """`spot_provider() -> (price, sigma_annual)`, `signal_provider() -> score`,
+        `window_open_provider(ts_ms) -> float | None` for window-relative markets
+        (the recurring 5m/15m/4h family - see `_resolve_strike`)."""
         self._spot_provider = spot_provider
         self._signal_provider = signal_provider
+        self._window_open_provider = window_open_provider
 
     def _event(self, kind: str, message: str) -> None:
         entry = {"ts": int(time.time() * 1000), "kind": kind, "message": message}
@@ -174,7 +185,7 @@ class PolymarketPipeline:
         now = int(time.time() * 1000)
         self.last_poll = now
 
-        markets = await self.client.search_markets(self.cfg.market_slug_contains)
+        markets = await self._discover_windows(now)
         if not markets:
             self.last_error = self.client.last_error or "no markets matched"
             return []
@@ -184,10 +195,11 @@ class PolymarketPipeline:
         score = self._score()
         out: list[EdgeAssessment] = []
 
-        for market in markets[:8]:                 # the most liquid handful
+        for market in markets:
             yes, no = market.yes, market.no
             if not yes or not no:
                 continue
+            self._resolve_strike(market, now)
             strike = market.resolution.strike or spot
             seconds = market.seconds_to_resolution(now)
             model_p, inputs = model_probability(
@@ -205,15 +217,113 @@ class PolymarketPipeline:
                 min_seconds=self.cfg.min_seconds_to_resolution,
             )
             a.inputs.update(inputs)
-            out.append(a)
 
-            if a.tradable and not self._has_position(market.id):
+            forced = False
+            if (
+                not a.tradable
+                and self.cfg.force_min_trades
+                and not self._has_position(market.id)
+            ):
+                forced = self._force_if_due(market, a)
+
+            out.append(a)
+            if (a.tradable or forced) and not self._has_position(market.id):
                 token = market.yes if a.side == "yes" else market.no
-                await self._paper_buy(market, a, token.token_id if token else "", now)
+                await self._paper_buy(
+                    market, a, token.token_id if token else "", now, forced=forced
+                )
 
         self.assessments = out
         await self._settle_due(now)
         return out
+
+    async def _discover_windows(self, now_ms: int) -> list[PredictionMarket]:
+        """The recurring BTC window family is created on a fixed clock, so
+        rather than search for it, compute its slug directly: the epoch in
+        `btc-updown-15m-<epoch>` is the window's own open time, aligned to
+        `window_seconds`. Exact-slug lookup is also the only Gamma filter
+        that actually narrows server-side - see `client.get_market_by_slug`.
+
+        Fetches the current window and the next one, so a position can be
+        sized up before the current window's book thins out into close.
+        """
+        step_ms = self.cfg.window_seconds * 1000
+        if step_ms <= 0:
+            return []
+        aligned = (now_ms // step_ms) * step_ms
+        out: list[PredictionMarket] = []
+        for open_ts in (aligned, aligned + step_ms):
+            slug = f"{self.cfg.market_slug_contains}-{open_ts // 1000}"
+            market = await self.client.get_market_by_slug(slug)
+            if market:
+                out.append(market)
+        return out
+
+    def _resolve_strike(self, market: PredictionMarket, now_ms: int) -> None:
+        """Fill in the strike for a window-relative market from our own price
+        series - only once the window has actually started, which is exactly
+        what `strike_known`'s existing contract already means ("False until
+        the open price is fixed"). Nothing to do for a fixed-strike market;
+        its strike came straight out of the text in `infer_resolution`.
+        """
+        spec = market.resolution
+        if spec.strike_mode != "window_open" or spec.strike_known:
+            return
+        if now_ms < market.window_open_ts or not self._window_open_provider:
+            return
+        try:
+            price = self._window_open_provider(market.window_open_ts)
+        except Exception:  # noqa: BLE001
+            price = None
+        if price:
+            spec.strike = price
+            spec.strike_known = True
+            spec.open_ts = market.window_open_ts
+
+    def _force_if_due(self, market: PredictionMarket, a: EdgeAssessment) -> bool:
+        """`force_min_trades`: guarantee a paper trade in this window even
+        with no organic edge, once close enough to resolution that an
+        organic signal was never going to arrive in time.
+
+        Still refuses anything that is not an economic judgement call - an
+        unverified resolution rule, a closed market, an empty book. Forcing a
+        trade this pipeline could not even score would corrupt the ledger,
+        not just the calibration stats. `edge`, `spread`, `size` and `stake`
+        are the blockers this is allowed to override - a weak or negative
+        edge already zeroes Kelly sizing on its own, which is exactly the
+        situation this mode exists to override (sizing is replaced with the
+        smallest fillable lot below, not left at zero).
+        """
+        overridable = {"edge", "spread", "size", "stake"}
+        hard_blockers = [b for b in a.blockers if b.split()[0] not in overridable]
+        if hard_blockers:
+            return False
+        if a.seconds_left > self.cfg.force_trade_before_close_s:
+            return False              # still time for an organic signal
+        if a.seconds_left < self.cfg.min_seconds_to_resolution:
+            return False              # too late even for a forced entry
+        if a.cost <= 0 or a.cost >= 1:
+            return False              # no real quote to transact against
+
+        # Sizing here is deliberately not Kelly - Kelly on a ~zero or negative
+        # edge sizes to zero, which is correct for a real bet and useless for
+        # a forced one. Take the smallest lot that also clears the venue's
+        # minimum order value; at a low price the lot-size minimum alone can
+        # still be worth under that.
+        lot = max(1.0, market.min_order_size)
+        min_notional = market.min_notional or 1.0
+        shares = lot
+        if shares * a.cost < min_notional:
+            shares = math.ceil(min_notional / a.cost / lot) * lot
+        if shares > a.depth_shares:
+            return False              # book can't fill even the minimum viable size
+
+        a.shares = shares
+        a.stake = a.shares * a.cost
+        a.kelly_fraction = 0.0
+        a.blockers = [f"forced: {b}" for b in a.blockers]
+        a.tradable = True
+        return True
 
     def _spot(self) -> tuple[float, float]:
         if self._spot_provider:
@@ -241,6 +351,7 @@ class PolymarketPipeline:
         a: EdgeAssessment,
         token_id: str,
         now: int,
+        forced: bool = False,
     ) -> PaperPosition | None:
         """Send the order, wait out the round trip, fill on the book that is
         there *when it arrives*.
@@ -263,7 +374,8 @@ class PolymarketPipeline:
         self.engine.instrument = Instrument(
             symbol=market.slug[:20] or "POLY", base="SHARES", quote="USDC",
             tick_size=market.tick_size or 0.01, step_size=1.0,
-            min_qty=market.min_order_size or 5.0, min_notional=1.0,
+            min_qty=market.min_order_size or 5.0,
+            min_notional=market.min_notional or 1.0,
         )
         self.engine.set_book(fresh)
         order = self.engine.submit(
@@ -284,16 +396,17 @@ class PolymarketPipeline:
             shares=order.filled_qty, cost=order.avg_price,
             opened_ts=arrival, end_ts=market.end_ts,
             strike=market.resolution.strike, model_p_at_entry=a.model_p,
-            edge_at_entry=a.edge, mark=order.avg_price,
+            edge_at_entry=a.edge, mark=order.avg_price, forced=forced,
         )
         self.positions.append(pos)
         self.equity -= pos.stake + order.fees
         filled_pct = order.filled_qty / a.shares * 100 if a.shares else 0
         self._event(
             "entry",
-            f"{market.slug}: bought {pos.shares:g} {a.side.upper()} at {pos.cost:.2f} "
-            f"({filled_pct:.0f}% of intended) · model {a.model_p:.0%} · "
-            f"edge {a.edge * 100:+.1f}pts · stake ${pos.stake:.2f}",
+            f"{market.slug}: {'FORCED ' if forced else ''}bought {pos.shares:g} "
+            f"{a.side.upper()} at {pos.cost:.2f} ({filled_pct:.0f}% of intended) · "
+            f"model {a.model_p:.0%} · edge {a.edge * 100:+.1f}pts · "
+            f"stake ${pos.stake:.2f}",
         )
         return pos
 
@@ -312,11 +425,18 @@ class PolymarketPipeline:
             pos.mark = 1.0 if outcome else 0.0
             pos.settle_note = note
             self.equity += payout
-            up_happened = outcome if pos.side == "yes" else 1 - outcome
-            self.forecasts.append((pos.model_p_at_entry, int(up_happened)))
+            if not pos.forced:
+                # A forced trade was told to ignore whatever the model's own
+                # edge said; scoring it as a forecast would flatter or damage
+                # the Brier/reliability numbers for a "prediction" that was
+                # never really one. Its PnL still counts in equity above, and
+                # it is fully visible in `stats["forced"]`.
+                up_happened = outcome if pos.side == "yes" else 1 - outcome
+                self.forecasts.append((pos.model_p_at_entry, int(up_happened)))
             self._event(
                 "settle",
-                f"{pos.slug}: {'WON' if outcome else 'LOST'} · "
+                f"{pos.slug}: {'FORCED ' if pos.forced else ''}"
+                f"{'WON' if outcome else 'LOST'} · "
                 f"${pos.pnl:+.2f} on a ${pos.stake:.2f} stake · {note}",
             )
 
@@ -349,7 +469,9 @@ class PolymarketPipeline:
     def state(self) -> dict:
         open_positions = [p for p in self.positions if not p.settled]
         settled = [p for p in self.positions if p.settled]
+        forced_settled = [p for p in settled if p.forced]
         wins = [p for p in settled if p.pnl > 0]
+        forced_wins = [p for p in forced_settled if p.pnl > 0]
         return {
             "enabled": True,
             "running": self.running,
@@ -362,6 +484,7 @@ class PolymarketPipeline:
             "assessments": [a.to_dict() for a in self.assessments],
             "positions": [p.to_dict() for p in open_positions],
             "settled": [p.to_dict() for p in settled[-20:]],
+            # All settled trades, forced or not - matches `equity`/`pnl` above.
             "stats": {
                 "open": len(open_positions),
                 "settled": len(settled),
@@ -369,6 +492,19 @@ class PolymarketPipeline:
                 "win_rate": round(len(wins) / len(settled) * 100, 2) if settled else 0.0,
                 "staked": round(sum(p.stake for p in settled), 2),
                 "pnl": round(sum(p.pnl for p in settled), 2),
+            },
+            # The volume-mode subset, broken out so it is never mistaken for
+            # organic edge performance. Excluded from `calibration` entirely.
+            "forced_stats": {
+                "enabled": self.cfg.force_min_trades,
+                "settled": len(forced_settled),
+                "wins": len(forced_wins),
+                "win_rate": (
+                    round(len(forced_wins) / len(forced_settled) * 100, 2)
+                    if forced_settled else 0.0
+                ),
+                "staked": round(sum(p.stake for p in forced_settled), 2),
+                "pnl": round(sum(p.pnl for p in forced_settled), 2),
             },
             "calibration": calibration_report(self.forecasts) if self.forecasts else None,
             "events": self.events[-40:],

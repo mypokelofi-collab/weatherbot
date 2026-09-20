@@ -127,6 +127,29 @@ def test_bootstrap_current_is_a_noop_once_a_bar_is_open():
     assert agg.current.open == 100
 
 
+def test_open_at_reads_the_live_bar_in_progress():
+    agg = CandleAggregator(STEP)
+    agg.add_trade(Trade(ts=2 * STEP, price=101.0, qty=1, side=Side.BUY))
+    assert agg.open_at(2 * STEP + 500) == 101.0
+    assert agg.open_at(2 * STEP) == 101.0        # exactly on the boundary
+
+
+def test_open_at_reads_a_closed_historical_bar():
+    agg = CandleAggregator(STEP)
+    agg.add_trade(Trade(ts=STEP, price=100.0, qty=1, side=Side.BUY))
+    agg.add_trade(Trade(ts=2 * STEP, price=200.0, qty=1, side=Side.BUY))
+    # Bar 1 is closed now that bar 2 has started; its open is still readable.
+    assert agg.open_at(STEP + 10) == 100.0
+    assert agg.open_at(2 * STEP + 10) == 200.0
+
+
+def test_open_at_is_none_for_a_bucket_we_never_saw():
+    agg = CandleAggregator(STEP)
+    agg.add_trade(Trade(ts=5 * STEP, price=100.0, qty=1, side=Side.BUY))
+    assert agg.open_at(2 * STEP) is None         # long before anything we have
+    assert agg.open_at(9 * STEP) is None         # in the future
+
+
 def test_first_real_trade_reclaims_a_bootstrapped_bar():
     agg = CandleAggregator(STEP)
     closed = []

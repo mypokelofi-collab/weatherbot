@@ -197,16 +197,31 @@ def assess(
     ass.depth_shares = depth_within(book_side, ass.cost, "ask")
     stake_cap = equity * max_stake_pct / 100.0
     stake = min(equity * ass.kelly_fraction, stake_cap)
+    lot = max(1.0, market.min_order_size)
+    min_notional = market.min_notional or 1.0
     if ass.cost > 0:
         shares = stake / ass.cost
         shares = min(shares, ass.depth_shares * 0.5)     # leave room to exit
-        shares = math.floor(shares / max(1.0, market.min_order_size)) * max(1.0, market.min_order_size)
+        shares = math.floor(shares / lot) * lot
+        # The lot-size minimum alone is not enough: at a low price, that many
+        # shares can still be worth less than the venue's minimum order
+        # value. Round up to the smallest lot multiple that clears it, but
+        # only if the stake cap and the book can actually support it -
+        # otherwise leave it short and let the blocker below catch it.
+        if 0 < shares * ass.cost < min_notional:
+            needed = math.ceil(min_notional / ass.cost / lot) * lot
+            if needed * ass.cost <= stake_cap and needed <= ass.depth_shares:
+                shares = needed
         ass.shares = max(0.0, shares)
         ass.stake = ass.shares * ass.cost
 
     if ass.shares < market.min_order_size:
         ass.blockers.append(
             f"size rounds below the venue minimum of {market.min_order_size:g} shares"
+        )
+    elif ass.stake < min_notional:
+        ass.blockers.append(
+            f"stake ${ass.stake:.2f} below the ${min_notional:.2f} venue minimum order value"
         )
 
     ass.tradable = not ass.blockers and ass.shares > 0

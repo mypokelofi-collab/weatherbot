@@ -591,8 +591,10 @@ function renderPolymarket() {
   card.hidden = false;
 
   const st = pm.stats || {};
+  const fst = pm.forced_stats || {};
+  const forcedNote = fst.enabled ? ` · ${fst.settled || 0} forced` : '';
   $('polyHint').textContent =
-    `${st.open || 0} open · ${st.settled || 0} settled · ${fmtUsd(pm.pnl || 0)}`;
+    `${st.open || 0} open · ${st.settled || 0} settled${forcedNote} · ${fmtUsd(pm.pnl || 0)}`;
 
   const kv = $('polyKv');
   kv.replaceChildren();
@@ -613,7 +615,8 @@ function renderPolymarket() {
   const rows = [
     ...(pm.positions || []).map((p) => ({
       slug: p.slug, model: p.model_p_at_entry, book: p.mark, edge: p.edge_at_entry,
-      left: (p.end_ts - (state.snap.ts || Date.now())), status: `holding ${p.shares} ${p.side}`,
+      left: (p.end_ts - (state.snap.ts || Date.now())),
+      status: `${p.forced ? 'FORCED · ' : ''}holding ${p.shares} ${p.side}`,
     })),
     ...(pm.assessments || []).map((a) => ({
       slug: a.slug, model: a.model_p, book: a.market_p, edge: a.edge,

@@ -559,6 +559,10 @@ class Trader:
                  if self.last_signal else 0.5) or 0.5,
             ),
             signal_provider=lambda: self.last_signal.score if self.last_signal else 0.0,
+            # The recurring BTC windows are UTC-aligned to the same grid as
+            # our own bars, so our own candle history *is* the reference
+            # series for "price when this window opened" - no extra feed.
+            window_open_provider=self.aggregator.open_at,
         )
         self._event("polymarket", "prediction-market pipeline attached (paper, read-only)")
 

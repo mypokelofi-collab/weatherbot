@@ -258,3 +258,52 @@ competes with people who do this for a living.
 
 That is worth testing with paper money and a calibration scorecard. It is not
 worth funding a wallet for until the scorecard says so.
+
+---
+
+## 10. What shipping this against the live API actually found
+
+Phase 2 sat behind `enabled: false` untested. Turning it on against the real
+Gamma/CLOB endpoints surfaced three bugs that would have silently zeroed
+this pipeline forever, plus one deliberate policy decision:
+
+1. **`market_slug_contains` pointed at the wrong family, and the discovery
+   call itself was broken regardless.** `"bitcoin-up-or-down"` matches the
+   hourly/daily fixed-strike markets, not the recurring 15-minute one this
+   is meant to trade. Worse, Gamma's `slug` query parameter is an *exact*
+   match, not a substring - passing any family prefix there returned `[]`
+   from the server every time, before the (correct) client-side filtering
+   ever ran. Both are fixed: `client.search_markets` no longer sends `slug`
+   as a filter, and the 15m family is found deterministically instead of
+   searched for - `btc-updown-15m-<epoch>` encodes its own window-open time,
+   aligned to `window_seconds`, so `PolymarketPipeline._discover_windows`
+   computes the slug for the current and next window and fetches each by
+   exact match (`client.get_market_by_slug`).
+2. **The recurring family has no fixed strike.** It compares a Chainlink
+   60s-TWAP close to *the price when its own window opened* - there is no
+   "$X" in the text for `infer_resolution`'s regex to find, and there
+   shouldn't be one. `ResolutionSpec.strike_mode = "window_open"` marks this,
+   and `PolymarketPipeline._resolve_strike` fills in the real number once the
+   window has actually started, from flowbot's own bar history
+   (`CandleAggregator.open_at`) - the two grids are UTC-aligned to the same
+   boundaries, so no second price feed is needed. Before the window opens,
+   `strike_known` stays `False` and the market correctly refuses to trade,
+   exactly per its existing contract.
+3. **A lot-size minimum is not a notional minimum.** `assess()` checked
+   `shares >= market.min_order_size` but not `shares * cost >= min_notional`;
+   on a low-priced outcome (a 0.12 ask, say) the venue's own share-count
+   minimum can still be worth under Polymarket's $1 minimum order value, and
+   the order is fine on our side and rejected on theirs. Sizing now rounds up
+   to the smallest lot multiple that clears both.
+4. **`force_min_trades` (policy, not a bug fix).** Per §2.1, genuine edge on
+   a 15-minute window does not show up every window - most windows should
+   trade zero times, by design. Guaranteeing activity for a bankroll that
+   wants to see the pipeline actually run therefore means overriding the
+   edge/spread/size/stake gates once a window is close enough to expiry that
+   an organic signal was never coming (`force_trade_before_close_s`, default
+   120s before close). A forced trade is sized to the smallest fillable lot
+   (never Kelly-sized - Kelly on ~zero edge sizes to zero, which is the
+   whole problem), tagged `forced` on the position, and excluded from
+   `state()["calibration"]` entirely - the phase-3 gate in §5 is measuring
+   whether the *model* is right, and a trade explicitly told to ignore what
+   the model said is not a data point about that.

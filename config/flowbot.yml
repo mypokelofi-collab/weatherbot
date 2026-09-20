@@ -108,4 +108,16 @@ server:
   auth_token: ""              # set to require ?token=… on the dashboard
 
 polymarket:
-  enabled: false
+  enabled: true
+  # The recurring 15-minute BTC window family (btc-updown-15m-<epoch>, epoch
+  # computed on window_seconds - see flowbot/polymarket/engine.py). Chainlink
+  # 60s-TWAP-vs-window-open settlement, not a fixed dollar strike.
+  market_slug_contains: btc-updown-15m
+  window_seconds: 900
+  min_seconds_to_resolution: 90
+  # Guarantee at least one paper trade per window: on a 15m window, genuine
+  # edge (a stale quote that hasn't caught up to a BTC move) does not show up
+  # every window by design - see docs/POLYMARKET_PIPELINE.md §2.1. Forced
+  # trades are tagged and excluded from the calibration/Brier stats.
+  force_min_trades: true
+  force_trade_before_close_s: 120

@@ -42,6 +42,13 @@ class ResolutionSpec:
     close_ts: int = 0                   # when it closes (resolution time)
     strike: float = 0.0                 # the level being compared against
     strike_known: bool = False          # False until the open price is fixed
+    # "fixed": strike is a literal level parsed from the text ("above $70,000").
+    # "window_open": strike is whatever BTC trades at when the window itself
+    # opens - true for the recurring 5m/15m/4h TWAP markets, which compare the
+    # close of the window to its own start rather than to a printed number.
+    # `strike` and `strike_known` mean the same thing either way; this just
+    # says where the engine has to go to fill them in.
+    strike_mode: str = "fixed"
     timezone_note: str = ""
     description: str = ""
 
@@ -57,6 +64,7 @@ class ResolutionSpec:
             "close_ts": self.close_ts,
             "strike": self.strike,
             "strike_known": self.strike_known,
+            "strike_mode": self.strike_mode,
             "verified": self.verified,
             "timezone_note": self.timezone_note,
             "description": self.description[:400],
@@ -81,11 +89,21 @@ class PredictionMarket:
     condition_id: str
     outcomes: list[Outcome] = field(default_factory=list)
     end_ts: int = 0
-    start_ts: int = 0
+    start_ts: int = 0                    # when the market became tradeable
+    window_open_ts: int = 0              # when the comparison window itself
+                                          # begins ("eventStartTime") - not the
+                                          # same thing for a market that opened
+                                          # for trading a day before its window
     volume: float = 0.0
     liquidity: float = 0.0
     tick_size: float = 0.01
     min_order_size: float = 5.0          # shares
+    # Gamma does not expose this per market; $1 is Polymarket's platform-wide
+    # minimum order value. Low-priced outcomes need this checked separately
+    # from `min_order_size` - the venue minimum share count can still be
+    # worth under $1 (5 shares at $0.12 is $0.60), and an order that clears
+    # one minimum but not the other still gets rejected at fill time.
+    min_notional: float = 1.0
     neg_risk: bool = False
     active: bool = True
     closed: bool = False
@@ -119,6 +137,7 @@ class PredictionMarket:
             "outcomes": [o.to_dict() for o in self.outcomes],
             "end_ts": self.end_ts,
             "start_ts": self.start_ts,
+            "window_open_ts": self.window_open_ts,
             "seconds_left": self.seconds_to_resolution(now_ms) if now_ms else None,
             "volume": self.volume,
             "liquidity": self.liquidity,

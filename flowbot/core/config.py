@@ -162,13 +162,31 @@ class PolymarketConfig(BaseModel):
     enabled: bool = False
     gamma_url: str = "https://gamma-api.polymarket.com"
     clob_url: str = "https://clob.polymarket.com"
-    market_slug_contains: str = "bitcoin-up-or-down"
+    # The recurring window family's slug prefix - the epoch suffix is
+    # *computed* from window_seconds, not searched for (Gamma's `slug` filter
+    # is exact-match only, so a prefix can never be found by search anyway).
+    # "btc-updown-15m" is the 15-minute family; "btc-updown-5m"/"-4h" exist
+    # too if window_seconds is changed to match.
+    market_slug_contains: str = "btc-updown-15m"
+    window_seconds: int = 900            # 15m - must match the family above
     poll_seconds: int = 30
     min_edge: float = 0.04               # probability points over the market
     max_stake_pct: float = 2.0           # % of equity per market
     kelly_fraction: float = 0.25
     taker_fee_bps: float = 0.0           # Polymarket CLOB charges no taker fee today
-    min_seconds_to_resolution: int = 300
+    # 5 minutes made sense as a floor on an hourly/daily market; on a 15m
+    # window it would refuse the last third of every window. 90s still clears
+    # the ~0.5s round-trip this pipeline actually waits out by two orders of
+    # magnitude.
+    min_seconds_to_resolution: int = 90
+    # Guarantee at least one paper trade per window even when no organic edge
+    # clears `min_edge` - which, per docs/POLYMARKET_PIPELINE.md §2.1, is most
+    # windows by design. A forced trade is tagged and excluded from the
+    # calibration/Brier stats in state()["calibration"], so turning this on
+    # buys trading volume without corrupting the number that gates real
+    # capital in phase 3.
+    force_min_trades: bool = False
+    force_trade_before_close_s: int = 120
     calibration_a: float = 2.4           # logistic slope on the momentum score
     calibration_b: float = 0.0
 

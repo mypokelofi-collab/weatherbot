@@ -69,7 +69,31 @@ def infer_resolution(raw: dict) -> ResolutionSpec:
     spec.open_ts = parse_iso(raw.get("startDate") or raw.get("start_date_iso"))
     spec.close_ts = parse_iso(raw.get("endDate") or raw.get("end_date_iso"))
 
-    # "above $70,000" style strikes
+    # The recurring 5m/15m/4h/daily "crypto market" family (Gamma tags these
+    # with a structured `cryptoMarketConfig`, which is far more reliable than
+    # parsing "time-weighted average price" out of the description) compares
+    # the close of the window to its own start, not to a printed dollar
+    # level. There is no "$X" in the text for these at all - the regex below
+    # would never match them, which is correct: the strike genuinely is not
+    # known until the window opens, and the engine fills it in from our own
+    # price series once it does (see `PolymarketPipeline._resolve_strike`).
+    crypto_cfg = raw.get("cryptoMarketConfig") or {}
+    if crypto_cfg.get("twapEnabled"):
+        asset = str(crypto_cfg.get("asset") or "btc").upper()
+        lookback = crypto_cfg.get("twapLookbackSeconds", 60)
+        spec.reference = f"chainlink:{asset}-USD:twap{lookback}s-vs-window-open"
+        spec.strike_mode = "window_open"
+        spec.timezone_note = spec.timezone_note or (
+            "UTC - window boundaries are UTC-aligned regardless of the ET wording"
+        )
+        # `open_ts` above is when the market opened for TRADING, which for
+        # this family can be a day before its comparison window starts.
+        # `eventStartTime` is the window itself; PredictionMarket carries it
+        # separately as `window_open_ts` since ResolutionSpec has no market
+        # context of its own.
+        return spec
+
+    # "above $70,000" style strikes (the daily/hourly fixed-strike family)
     m = re.search(r"\$([0-9][0-9,]{2,})", text)
     if m:
         try:
@@ -101,6 +125,10 @@ def parse_market(raw: dict) -> PredictionMarket:
         outcomes=outcomes,
         end_ts=parse_iso(raw.get("endDate") or raw.get("end_date_iso")),
         start_ts=parse_iso(raw.get("startDate") or raw.get("start_date_iso")),
+        window_open_ts=(
+            parse_iso(raw.get("eventStartTime"))
+            or parse_iso(raw.get("startDate") or raw.get("start_date_iso"))
+        ),
         volume=float(raw.get("volumeNum") or raw.get("volume") or 0) or 0.0,
         liquidity=float(raw.get("liquidityNum") or raw.get("liquidity") or 0) or 0.0,
         tick_size=float(raw.get("orderPriceMinTickSize") or 0.01),
@@ -144,13 +172,22 @@ class PolymarketClient:
     async def search_markets(
         self, slug_contains: str = "bitcoin-up-or-down", limit: int = 40
     ) -> list[PredictionMarket]:
+        """Broad, volume-sorted market list, filtered client-side.
+
+        Gamma's `slug` query param is an *exact* match, not a substring one -
+        passing a family prefix there (as this used to do) silently returns
+        an empty list every time, on every family. The filtering has to
+        happen after the fetch. Note this still will not surface a
+        low-volume recurring market buried outside the top `limit` by
+        overall volume; for the BTC 5m/15m/4h family, prefer
+        `get_market_by_slug` with a computed slug instead (see
+        `PolymarketPipeline._discover_windows`).
+        """
         client = await self._http()
         params = {
             "closed": "false", "active": "true", "limit": str(limit),
             "order": "volumeNum", "ascending": "false",
         }
-        if slug_contains:
-            params["slug"] = slug_contains
         try:
             r = await client.get(f"{self.gamma_url}/markets", params=params)
             r.raise_for_status()
@@ -168,6 +205,27 @@ class PolymarketClient:
                 if needle in m.slug.lower() or needle.replace("-", " ") in m.question.lower()
             ]
         return markets
+
+    async def get_market_by_slug(self, slug: str) -> PredictionMarket | None:
+        """Exact-slug lookup - the one Gamma filter that actually narrows on
+        the server. `slug=` as a substring filter (what `search_markets` used
+        to rely on for this family) silently returns an empty list; only an
+        exact match works. The recurring BTC windows encode their own open
+        time in the slug (`btc-updown-15m-<epoch>`, aligned to the window
+        size), so the caller can compute the slug it wants instead of
+        searching for it - see `PolymarketPipeline._discover_windows`.
+        """
+        client = await self._http()
+        try:
+            r = await client.get(f"{self.gamma_url}/markets", params={"slug": slug})
+            r.raise_for_status()
+            rows = r.json()
+        except Exception as exc:  # noqa: BLE001
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            return None
+        if not rows or not isinstance(rows[0], dict):
+            return None
+        return parse_market(rows[0])
 
     async def get_market(self, market_id: str) -> PredictionMarket | None:
         client = await self._http()
