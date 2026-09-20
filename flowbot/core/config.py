@@ -186,7 +186,13 @@ class PolymarketConfig(BaseModel):
     # buys trading volume without corrupting the number that gates real
     # capital in phase 3.
     force_min_trades: bool = False
-    force_trade_before_close_s: int = 120
+    # Wide on purpose: a forced attempt can still miss its fill (the quote
+    # gets pulled during the round trip, or a further price move drops the
+    # notional below the venue minimum by the time it lands - both observed
+    # live). At poll_seconds=30, a 30s-wide window gives one attempt and no
+    # recovery if it misses; this gives ~7, so one bad fill doesn't cost the
+    # window its only guaranteed trade.
+    force_trade_before_close_s: int = 300
     calibration_a: float = 2.4           # logistic slope on the momentum score
     calibration_b: float = 0.0
 

@@ -120,4 +120,8 @@ polymarket:
   # every window by design - see docs/POLYMARKET_PIPELINE.md §2.1. Forced
   # trades are tagged and excluded from the calibration/Brier stats.
   force_min_trades: true
-  force_trade_before_close_s: 120
+  # Wide on purpose - one attempt can still miss its fill (quote pulled, or a
+  # further price move drops it below the venue's min notional by the time
+  # it lands, both seen live). This gives ~7 poll cycles to retry instead of
+  # ~1, so one bad fill doesn't cost the window its only guaranteed trade.
+  force_trade_before_close_s: 300
