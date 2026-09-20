@@ -121,6 +121,16 @@ def test_dashboard_page_and_assets_are_served(running_app):
         assert client.get(asset).status_code == 200
 
 
+def test_page_and_assets_are_never_cached_blindly(running_app):
+    # Regression: a CSS fix went out in a redeploy and a browser with no
+    # special configuration kept rendering the old layout - no Cache-Control
+    # meant it trusted a disk-cached copy without even revalidating. There is
+    # no content hash in these filenames to bust a cache with instead.
+    client, _, _ = running_app
+    for path in ("/", "/static/app.js", "/static/charts.js", "/static/styles.css"):
+        assert client.get(path).headers["cache-control"] == "no-cache", path
+
+
 def test_auth_token_gates_the_api(app_config):
     cfg = app_config
     cfg.server.auth_token = "s3cret"

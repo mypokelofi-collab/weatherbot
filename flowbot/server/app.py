@@ -94,6 +94,21 @@ def create_app(trader: Trader, cfg: AppConfig) -> FastAPI:
         if supplied != token:
             raise HTTPException(status_code=401, detail="bad or missing token")
 
+    # Every deploy can change the page, the CSS or the JS, and this app has
+    # no content-hashed filenames to bust a cache with. Without an explicit
+    # Cache-Control, browsers may reuse a stale disk-cached copy on a plain
+    # navigation even after Last-Modified/ETag have changed - a real
+    # redeploy went out with a CSS ordering fix and a fresh tab still
+    # rendered the old layout until this was added. `no-cache` still lets
+    # the browser keep a local copy; it just forces a conditional GET (cheap
+    # 304 on a hit) instead of trusting the cache blindly.
+    @app.middleware("http")
+    async def no_cache_for_the_page_and_its_assets(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     # -- pages -------------------------------------------------------------
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
