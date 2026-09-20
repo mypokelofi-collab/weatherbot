@@ -10,6 +10,12 @@
 # BIND_ADDR=127.0.0.1 and reach it over an SSH tunnel:
 #     ssh -N -L 8033:127.0.0.1:8033 user@your-vps
 
+# Pinned so the project never collides with anything else on the host.
+# Without this, compose derives the project from the directory name, and
+# every scoped command (down, ps, remove-orphans) would aim at the wrong set
+# of containers on a machine already running other bots.
+name: flowbot-btc15m
+
 services:
   flowbot:
     build:
@@ -18,7 +24,7 @@ services:
     image: flowbot:latest
     # Override with COMPOSE_CONTAINER_NAME if the host already has a
     # container by this name.
-    container_name: ${CONTAINER_NAME:-flowbot}
+    container_name: ${CONTAINER_NAME:-flowbot-btc15m}
     restart: unless-stopped
     env_file:
       - path: .env

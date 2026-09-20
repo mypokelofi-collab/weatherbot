@@ -65,8 +65,10 @@ main() {
     # the branch exactly.
     git reset --hard "origin/${branch}" >>"${build_log}" 2>&1
 
+    # Deliberately no --remove-orphans: this host runs other containers and
+    # a scoped delete is not worth the risk for a flag we do not need.
     local deploy_ok=true
-    if ! docker compose up -d --build --remove-orphans >>"${build_log}" 2>&1; then
+    if ! docker compose up -d --build >>"${build_log}" 2>&1; then
         deploy_ok=false
         log "docker compose failed"
     fi
@@ -78,7 +80,7 @@ main() {
     port="${port:-8033}"
     health="$(curl -fsS -m 5 "http://127.0.0.1:${port}/api/health" 2>/dev/null || echo '{}')"
     if [[ "${health}" == "{}" ]]; then
-        health="$(docker exec "${CONTAINER_NAME:-flowbot}" python -c \
+        health="$(docker exec "${CONTAINER_NAME:-flowbot-btc15m}" python -c \
             "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8033/api/health',timeout=4).read().decode())" \
             2>/dev/null || echo '{}')"
     fi

@@ -145,7 +145,7 @@ scp -q "${REMOTE_ENV}" "${TARGET}:${REMOTE_PATH}/.env"
 $SSH "${TARGET}" "chmod 600 '${REMOTE_PATH}/.env'"
 
 say "Building and starting the container"
-$SSH "${TARGET}" "cd '${REMOTE_PATH}' && docker compose build ${NO_BUILD_CACHE} && docker compose up -d --remove-orphans"
+$SSH "${TARGET}" "cd '${REMOTE_PATH}' && docker compose build ${NO_BUILD_CACHE} && docker compose up -d"
 
 say "Waiting for the bot to come up"
 for i in $(seq 1 30); do

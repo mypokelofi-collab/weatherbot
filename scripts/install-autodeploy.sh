@@ -17,7 +17,7 @@ BRANCH="${FLOWBOT_BRANCH:-claude/btc-momentum-trading-bot-wqxm70}"
 DIR="${FLOWBOT_DIR:-/opt/flowbot}"
 PORT="${FLOWBOT_PORT:-}"
 BIND="${FLOWBOT_BIND:-0.0.0.0}"
-NAME="${CONTAINER_NAME:-flowbot}"
+NAME="${CONTAINER_NAME:-flowbot-btc15m}"
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[31merror: %s\033[0m\n' "$*" >&2; exit 1; }
@@ -25,31 +25,69 @@ die() { printf '\033[31merror: %s\033[0m\n' "$*" >&2; exit 1; }
 [[ "$(id -u)" -eq 0 ]] || die "run as root (sudo)"
 
 say "Checking Docker"
-if ! command -v docker >/dev/null; then
-    say "Installing Docker"
+# Never reinstall or restart Docker on a host that is already using it -
+# that would bounce every other container on the machine.
+if command -v docker >/dev/null; then
+    echo "Docker is already installed; leaving it exactly as it is."
+    docker --version
+    RUNNING_COUNT="$(docker ps -q 2>/dev/null | wc -l || echo 0)"
+    echo "${RUNNING_COUNT} container(s) already running - none will be touched."
+else
+    say "Installing Docker (not currently present)"
     curl -fsSL https://get.docker.com | sh
 fi
-docker compose version >/dev/null 2>&1 || apt-get install -y docker-compose-plugin
+if ! docker compose version >/dev/null 2>&1; then
+    echo "adding the compose plugin (additive; does not restart the daemon)"
+    apt-get install -y docker-compose-plugin
+fi
 docker compose version
 
 say "Choosing a free port"
+# A stopped container still owns its published port the moment it restarts,
+# so both lists matter on a host running several bots.
+TAKEN="$( { ss -ltn 2>/dev/null | awk 'NR>1{print $4}' | sed 's/.*://';
+            docker ps -a --format '{{.Ports}}' 2>/dev/null | grep -oE ':[0-9]+' | tr -d ':'; } \
+          | sort -un )"
 if [[ -z "${PORT}" ]]; then
     for candidate in 8033 8034 8035 8036 8037 8038; do
-        if ! ss -ltn 2>/dev/null | grep -q ":${candidate} "; then
+        if ! grep -qx "${candidate}" <<<"${TAKEN}"; then
             PORT="${candidate}"
             break
         fi
     done
 fi
-[[ -n "${PORT}" ]] || die "no free port found in 8033-8038; set FLOWBOT_PORT"
-ss -ltn 2>/dev/null | grep -q ":${PORT} " && die "port ${PORT} is already in use"
+[[ -n "${PORT}" ]] || die "no free port in 8033-8038 on this host; set FLOWBOT_PORT to one you know is free"
+if grep -qx "${PORT}" <<<"${TAKEN}"; then
+    echo "port ${PORT} is claimed by:" >&2
+    ss -ltnp 2>/dev/null | grep ":${PORT} " >&2 || true
+    docker ps -a --format '{{.Names}}\t{{.Ports}}' 2>/dev/null | grep ":${PORT}->" >&2 || true
+    die "pick another port with FLOWBOT_PORT=<n>"
+fi
 echo "using port ${PORT}"
 
-if docker ps -a --format '{{.Names}}' | grep -qx "${NAME}"; then
-    if [[ "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "${NAME}" 2>/dev/null)" != "flowbot" ]]; then
-        die "a container named ${NAME} already exists and is not ours; set CONTAINER_NAME"
+say "Checking for collisions with what is already on this host"
+if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "${NAME}"; then
+    PROJECT="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "${NAME}" 2>/dev/null || true)"
+    if [[ "${PROJECT}" != "flowbot-btc15m" ]]; then
+        die "a container named ${NAME} already exists and belongs to '${PROJECT:-another owner}'; set CONTAINER_NAME to something else"
     fi
+    echo "found our own previous container; it will be replaced"
 fi
+
+if [[ -e "${DIR}" && ! -d "${DIR}/.git" ]]; then
+    die "${DIR} already exists and is not a git checkout; set FLOWBOT_DIR to another path"
+fi
+if [[ -d "${DIR}/.git" ]] && ! git -C "${DIR}" remote get-url origin 2>/dev/null | grep -q "weatherbot"; then
+    die "${DIR} is a git checkout of something else; set FLOWBOT_DIR to another path"
+fi
+
+if systemctl list-unit-files 2>/dev/null | grep -q '^flowbot-autodeploy'; then
+    if ! grep -qs "${DIR}" /etc/systemd/system/flowbot-autodeploy.service; then
+        die "a flowbot-autodeploy unit is already installed and points somewhere else; remove it first"
+    fi
+    echo "our deploy agent is already installed; it will be updated"
+fi
+echo "no collisions"
 
 say "Fetching the code into ${DIR}"
 if [[ -d "${DIR}/.git" ]]; then
