@@ -54,7 +54,7 @@ real order.
                     ┌─────────────────────────┼─────────────────────┐
                     ▼                         ▼                     ▼
               Portfolio /              SQLite ledger          Dashboard
-              closed trades            (audit trail)          (:8032, ws)
+              closed trades            (audit trail)          (:8033, ws)
 ```
 
 Two systems, deliberately separate, exactly as asked:
@@ -232,7 +232,7 @@ becomes a market order that pays the spread, exactly as it would live.
 
 ---
 
-## 6. Dashboard (`:8032`)
+## 6. Dashboard (`:8033`)
 
 One page, dark by default, no CDN dependencies (it has to work on a firewalled
 VPS). Websocket pushes a full snapshot on every bar close, fill and event, and

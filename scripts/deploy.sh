@@ -3,7 +3,7 @@
 # One-command deploy of flowbot to a VPS over SSH.
 #
 #   ./scripts/deploy.sh user@your-vps
-#   ./scripts/deploy.sh user@your-vps --port 8032 --path /opt/flowbot
+#   ./scripts/deploy.sh user@your-vps --port 8033 --path /opt/flowbot
 #
 # What it does, in order:
 #   1. checks it can reach the host and that Docker is installed there
@@ -20,7 +20,7 @@ set -euo pipefail
 
 TARGET="${1:-}"
 REMOTE_PATH="/opt/flowbot"
-HOST_PORT="8032"
+HOST_PORT="8033"
 BIND_ADDR="0.0.0.0"
 TOKEN=""
 VENUE=""
@@ -81,6 +81,24 @@ if ! $SSH "${TARGET}" "docker compose version >/dev/null 2>&1"; then
   exit 1
 fi
 
+say "Checking port ${HOST_PORT} is free on ${HOST_ONLY}"
+# A VPS usually has other things running on it. Finding out that the port is
+# taken *after* building an image is a waste of everyone's time.
+IN_USE="$($SSH "${TARGET}" "ss -ltnp 2>/dev/null | grep -E ':${HOST_PORT}[[:space:]]' || true")"
+if [[ -n "${IN_USE}" ]]; then
+  EXISTING="$($SSH "${TARGET}" "docker ps --filter 'publish=${HOST_PORT}' --format '{{.Names}}' 2>/dev/null | head -1" || true)"
+  if [[ "${EXISTING}" == "flowbot" ]]; then
+    echo "port ${HOST_PORT} is held by this bot's own container; it will be replaced."
+  else
+    echo "port ${HOST_PORT} on ${HOST_ONLY} is already in use:" >&2
+    echo "${IN_USE}" >&2
+    [[ -n "${EXISTING}" ]] && echo "(docker container: ${EXISTING})" >&2
+    echo >&2
+    echo "pick another one:  $0 ${TARGET} --port 8034" >&2
+    exit 1
+  fi
+fi
+
 say "Copying the repository to ${REMOTE_PATH}"
 $SSH "${TARGET}" "mkdir -p '${REMOTE_PATH}/data/state' '${REMOTE_PATH}/data/recordings'"
 
@@ -131,8 +149,8 @@ $SSH "${TARGET}" "cd '${REMOTE_PATH}' && docker compose build ${NO_BUILD_CACHE} 
 
 say "Waiting for the bot to come up"
 for i in $(seq 1 30); do
-  if $SSH "${TARGET}" "curl -fsS -m 3 'http://127.0.0.1:8032/api/health' >/dev/null 2>&1 \
-       || docker exec flowbot python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8032/api/health',timeout=3)\" >/dev/null 2>&1"; then
+  if $SSH "${TARGET}" "curl -fsS -m 3 'http://127.0.0.1:8033/api/health' >/dev/null 2>&1 \
+       || docker exec flowbot python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8033/api/health',timeout=3)\" >/dev/null 2>&1"; then
     break
   fi
   sleep 2
@@ -143,7 +161,7 @@ for i in $(seq 1 30); do
   }
 done
 
-HEALTH="$($SSH "${TARGET}" "docker exec flowbot python -c \"import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8032/api/health',timeout=4).read().decode())\"" 2>/dev/null || echo '{}')"
+HEALTH="$($SSH "${TARGET}" "docker exec flowbot python -c \"import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8033/api/health',timeout=4).read().decode())\"" 2>/dev/null || echo '{}')"
 
 cat <<DONE
 
@@ -163,9 +181,9 @@ if [[ "${BIND_ADDR}" == "0.0.0.0" ]]; then
   cat <<'WARN'
   The dashboard is reachable from the internet and protected only by that
   token. Consider one of:
-    * a firewall rule allowing your IP only (ufw allow from <ip> to any port 8032)
+    * a firewall rule allowing your IP only (ufw allow from <ip> to any port 8033)
     * --bind 127.0.0.1 plus an SSH tunnel:
-        ssh -N -L 8032:127.0.0.1:8032 <target>
+        ssh -N -L 8033:127.0.0.1:8033 <target>
 
 WARN
 fi

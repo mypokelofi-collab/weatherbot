@@ -2,7 +2,7 @@
 #
 # Two stages so the runtime image carries no compiler and no pip cache.
 # Runs as an unprivileged user, writes only to /app/data, and exposes the
-# dashboard on 8032.
+# dashboard on 8033.
 
 FROM python:3.12-slim AS builder
 
@@ -41,13 +41,13 @@ COPY pyproject.toml README.md ./
 RUN mkdir -p /app/data/state /app/data/recordings && chown -R flowbot:flowbot /app
 
 USER flowbot
-EXPOSE 8032
+EXPOSE 8033
 
 # Liveness only: the endpoint answers 200 even when the market feed is
 # reconnecting, because a bot that is up but waiting for data should not be
 # restarted out from under its own reconnect logic.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8032/api/health', timeout=4).status == 200 else 1)"
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8033/api/health', timeout=4).status == 200 else 1)"
 
 ENTRYPOINT ["python", "-m", "flowbot"]
 CMD ["run", "-c", "config/flowbot.yml"]

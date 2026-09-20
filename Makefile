@@ -3,7 +3,7 @@
 PY ?= python3
 VENV ?= .venv
 HOST ?=
-PORT ?= 8032
+PORT ?= 8033
 
 .PHONY: help venv test run sim backtest record docker deploy logs clean
 

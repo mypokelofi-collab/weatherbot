@@ -11,8 +11,8 @@ It never needs an exchange API key, because it cannot place a real order.
 From a checkout on your machine:
 
 ```bash
-./scripts/deploy.sh user@your-vps            # dashboard on :8032
-./scripts/deploy.sh user@your-vps --port 8032 --path /opt/flowbot
+./scripts/deploy.sh user@your-vps            # dashboard on :8033
+./scripts/deploy.sh user@your-vps --port 8033 --path /opt/flowbot
 ```
 
 The script checks SSH and Docker on the host, copies the repository (without
@@ -93,7 +93,7 @@ docker compose down                # stop
 ls -la data/state                  # flowbot.sqlite: orders, fills, trades, equity
 ```
 
-The dashboard is at `http://your-vps:8032/?token=<token>`. `GET /api/health`
+The dashboard is at `http://your-vps:8033/?token=<token>`. `GET /api/health`
 is open (for uptime monitors); everything else requires the token once one is
 set.
 
@@ -107,16 +107,16 @@ edits — so treat the URL as a credential. Pick one:
 **Firewall to your own IP**
 
 ```bash
-ufw allow from <your-ip> to any port 8032 proto tcp
-ufw deny 8032
+ufw allow from <your-ip> to any port 8033 proto tcp
+ufw deny 8033
 ```
 
 **SSH tunnel (nothing exposed at all)**
 
 ```bash
 ./scripts/deploy.sh user@your-vps --bind 127.0.0.1
-ssh -N -L 8032:127.0.0.1:8032 user@your-vps
-# then open http://localhost:8032
+ssh -N -L 8033:127.0.0.1:8033 user@your-vps
+# then open http://localhost:8033
 ```
 
 **Reverse proxy with TLS** — put Caddy or nginx in front, terminate HTTPS on
@@ -125,7 +125,7 @@ forward websocket upgrade headers for `/ws`:
 
 ```caddy
 your-host.example.com {
-    reverse_proxy 127.0.0.1:8032
+    reverse_proxy 127.0.0.1:8033
 }
 ```
 
@@ -169,12 +169,12 @@ Two things worth verifying on day one:
 
 ```bash
 # 1. the venue and data provenance
-curl -s 'http://your-vps:8032/api/health?token=…' | python3 -m json.tool
+curl -s 'http://your-vps:8033/api/health?token=…' | python3 -m json.tool
 #    "real_data": true  -> live exchange feed
 #    "real_data": false -> simulator; the dashboard also shows a banner
 
 # 2. the book is live and synced
-curl -s 'http://your-vps:8032/api/state?token=…' \
+curl -s 'http://your-vps:8033/api/state?token=…' \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["feed"], d["book"]["spread_bps"])'
 ```
 

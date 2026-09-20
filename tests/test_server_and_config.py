@@ -171,7 +171,7 @@ def test_config_file_round_trip(tmp_path):
     cfg = load_config(path)
     assert cfg.risk.start_equity == 5000
     assert cfg.data.venue == "simulator"
-    assert cfg.server.port == 8032            # default preserved
+    assert cfg.server.port == 8033            # default preserved
 
 
 def test_missing_config_file_is_an_error(tmp_path):
@@ -182,7 +182,7 @@ def test_missing_config_file_is_an_error(tmp_path):
 def test_default_config_is_paper_only():
     cfg = AppConfig()
     assert cfg.mode == "paper"
-    assert cfg.server.port == 8032
+    assert cfg.server.port == 8033
     assert cfg.risk.risk_per_trade_pct <= 1.0
 
 

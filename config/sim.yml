@@ -85,7 +85,7 @@ execution:
 
 server:
   host: 0.0.0.0
-  port: 8032
+  port: 8033
   title: "flowbot · BTC 15m momentum"
   broadcast_hz: 4
   auth_token: ""              # set to require ?token=… on the dashboard

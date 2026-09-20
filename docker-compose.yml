@@ -4,11 +4,11 @@
 #   docker compose up -d --build
 #   docker compose logs -f
 #
-# The dashboard is published on ${HOST_PORT:-8032}. Bound to 0.0.0.0 by
+# The dashboard is published on ${HOST_PORT:-8033}. Bound to 0.0.0.0 by
 # default so it is reachable from your browser - which is exactly why
 # FLOWBOT_SERVER__AUTH_TOKEN should be set. To keep it private instead, set
 # BIND_ADDR=127.0.0.1 and reach it over an SSH tunnel:
-#     ssh -N -L 8032:127.0.0.1:8032 user@your-vps
+#     ssh -N -L 8033:127.0.0.1:8033 user@your-vps
 
 services:
   flowbot:
@@ -16,17 +16,19 @@ services:
       context: .
       dockerfile: Dockerfile
     image: flowbot:latest
-    container_name: flowbot
+    # Override with COMPOSE_CONTAINER_NAME if the host already has a
+    # container by this name.
+    container_name: ${CONTAINER_NAME:-flowbot}
     restart: unless-stopped
     env_file:
       - path: .env
         required: false
     environment:
       FLOWBOT_SERVER__HOST: "0.0.0.0"
-      FLOWBOT_SERVER__PORT: "8032"
+      FLOWBOT_SERVER__PORT: "8033"
       FLOWBOT_STATE_DIR: "/app/data/state"
     ports:
-      - "${BIND_ADDR:-0.0.0.0}:${HOST_PORT:-8032}:8032"
+      - "${BIND_ADDR:-0.0.0.0}:${HOST_PORT:-8033}:8033"
     volumes:
       # Trade ledger, equity history and recordings survive redeploys.
       - ./data:/app/data
@@ -37,7 +39,7 @@ services:
         max-file: "5"
     stop_grace_period: 20s
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8032/api/health', timeout=4).status == 200 else 1)"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8033/api/health', timeout=4).status == 200 else 1)"]
       interval: 30s
       timeout: 5s
       start_period: 45s

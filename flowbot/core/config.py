@@ -151,7 +151,7 @@ class ExecConfig(BaseModel):
 
 class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
-    port: int = 8032
+    port: int = 8033
     title: str = "flowbot · BTC 15m momentum"
     broadcast_hz: float = 4.0            # dashboard state pushes per second
     tape_size: int = 300

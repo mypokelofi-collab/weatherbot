@@ -23,11 +23,11 @@ make sim                        # offline demo on a synthetic market
 make run                        # live Binance USDⓈ-M data, paper money
 ```
 
-Then open **http://localhost:8032**.
+Then open **http://localhost:8033**.
 
 ```bash
 make test                       # 128 tests
-make deploy HOST=user@your-vps  # docker compose on a VPS, dashboard on :8032
+make deploy HOST=user@your-vps  # docker compose on a VPS, dashboard on :8033
 ```
 
 The simulator is clearly labelled everywhere it appears — the dashboard shows
@@ -118,7 +118,7 @@ FLOWBOT_DATA__VENUE=binance-spot
 
 ## Dashboard
 
-Served on `:8032`, no external CDN, works on a phone. It shows equity and
+Served on `:8033`, no external CDN, works on a phone. It shows equity and
 drawdown, the open position with the stop actually in force and what exiting
 right now would cost, the signal score with every component's contribution and
 a plain-English reason list, the live depth ladder, the tape with cumulative
