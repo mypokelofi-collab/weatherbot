@@ -41,20 +41,37 @@ function el(tag, className, html) {
 }
 
 /* ------------------------------------------------------------ websocket */
+// A rejected handshake (bad or missing token) and a genuine network drop
+// both surface to this code as a plain close event - the browser hides the
+// HTTP status of a failed WebSocket upgrade. Retrying a bad token forever,
+// silently, every 2s is how "reconnecting" ends up looking indistinguishable
+// from a dead server. What we *can* check ourselves is whether the URL even
+// has a token, which is the actual cause almost every time this has come up
+// (a stale tab, a bookmark, or the link pasted without its query string).
+let consecutiveCloses = 0;
+
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const token = new URLSearchParams(location.search).get('token');
-  const url = `${proto}://${location.host}/ws${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+  if (!token) {
+    setConnState('no access token in this URL - reopen the link with ?token=…');
+    return;   // nothing a retry loop can fix; don't spam the server for it
+  }
+  const url = `${proto}://${location.host}/ws?token=${encodeURIComponent(token)}`;
   const ws = new WebSocket(url);
 
   ws.onopen = () => {
     state.connected = true;
+    consecutiveCloses = 0;
     setConnState('live');
   };
   ws.onclose = () => {
     state.connected = false;
-    setConnState('reconnecting…');
-    setTimeout(connect, 2000);
+    consecutiveCloses += 1;
+    const hint = consecutiveCloses >= 3 ? ' - check the token in the URL is still correct' : '';
+    setConnState(`reconnecting…${hint}`);
+    const backoffMs = Math.min(2000 * 2 ** Math.min(consecutiveCloses - 1, 4), 20000);
+    setTimeout(connect, backoffMs);
   };
   ws.onerror = () => ws.close();
   ws.onmessage = (ev) => {
