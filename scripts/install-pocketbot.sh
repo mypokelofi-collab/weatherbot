@@ -13,6 +13,7 @@
 #   POCKETBOT_SSID='42["auth",...]'  default: keep, else ask (Enter skips)
 #   POCKETBOT_PORT=8040              POCKETBOT_BIND=0.0.0.0
 #   POCKETBOT_DIR=/opt/pocketbot     POCKETBOT_BRANCH=<this branch>
+#   POCKETBOT_NONINTERACTIVE=1       never prompt (run by an agent or a script)
 
 set -euo pipefail
 
@@ -54,7 +55,8 @@ main() {
     [[ -n "${bind}" ]] || bind="$(env_get POCKET_BIND_ADDR)"
     [[ -n "${bind}" ]] || bind="0.0.0.0"
     [[ -n "${ssid}" ]] || ssid="$(env_get POCKETBOT_SSID)"
-    if [[ -z "${ssid}" && -r /dev/tty ]]; then
+    # POCKETBOT_NONINTERACTIVE=1 never prompts (for agents and scripts with no keyboard).
+    if [[ -z "${ssid}" && -z "${POCKETBOT_NONINTERACTIVE:-}" && -r /dev/tty ]]; then
         echo "Paste your Pocket Option SSID (the 42[\"auth\",...] frame), or press Enter for a synthetic market:"
         IFS= read -rs ssid </dev/tty || true
         echo
