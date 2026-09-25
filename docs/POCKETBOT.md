@@ -176,6 +176,17 @@ Run workflow → `app: pocketbot`. It uses the same `VPS_HOST`, `VPS_USER` and
 Choose `pocket_mode: paper` (live prices, no orders) or `demo` (orders on the
 demo account). Real-money mode can't be set from a deploy.
 
+**On the server itself (simplest):** log in to the VPS and run
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mypokelofi-collab/weatherbot/claude/pocket-broker-trading-bot-nzszf3/scripts/install-pocketbot.sh | sudo bash
+```
+
+It asks for your SSID (press Enter to skip), builds and starts the
+container, and prints the dashboard link with its token. Re-run it to
+update. Settings and ledgers are kept. Add `POCKETBOT_MODE=demo` before `sudo bash`
+(as `sudo POCKETBOT_MODE=demo bash`) to trade the demo account.
+
 **From a machine with SSH access:**
 
 ```bash
