@@ -16,11 +16,15 @@ dependencies = [
     "PyYAML>=6.0",
 ]
 
+[project.optional-dependencies]
+pocket = ["binaryoptionstoolsv2>=0.2.15"]
+
 [project.scripts]
 flowbot = "flowbot.__main__:main"
+pocketbot = "pocketbot.__main__:main"
 
 [tool.setuptools.packages.find]
-include = ["flowbot*"]
+include = ["flowbot*", "pocketbot*"]
 
 [tool.setuptools.package-data]
 "flowbot.server" = ["dashboard/*"]

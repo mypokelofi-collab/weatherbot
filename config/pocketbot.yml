@@ -1,0 +1,46 @@
+# pocketbot — fixed-time trading on Pocket Option / Pocket Broker.
+#
+# The session string is never read from this file. Put it in the environment:
+#   export POCKETBOT_SSID='42["auth",{"session":"...","isDemo":1,"uid":12345,"platform":2}]'
+# docs/POCKETBOT.md shows how to copy it out of the browser.
+
+# paper  - no orders reach the broker. Live candles if POCKETBOT_SSID is set,
+#          otherwise a synthetic market.
+# demo   - real orders on the Pocket Option DEMO account (SSID must have isDemo 1).
+# live   - real money. Also needs POCKETBOT_REAL_MONEY=yes-i-accept-the-risk.
+mode: paper
+
+asset: EURUSD_otc       # `python -m pocketbot assets` lists what is open and its payout
+period: 60              # candle size in seconds (1, 5, 15, 30, 60, 300 ...)
+expiry_candles: 3       # trade duration = period * expiry_candles (here 3 minutes)
+history_hours: 3
+ws_url: null            # override the websocket endpoint if the default regions fail
+ledger: data/pocketbot/trades.jsonl
+
+paper:
+  balance: 1000
+  payout: 0.85          # only used when there is no live connection to ask
+
+strategy:
+  name: reversion       # reversion | momentum
+  bb_period: 20
+  bb_k: 2.2
+  rsi_period: 7
+  rsi_low: 25
+  rsi_high: 75
+  ema_fast: 9
+  ema_slow: 50
+  max_trend: 0.35
+  trend_lookback: 10
+  min_confidence: 0.0
+
+risk:
+  stake_fraction: 0.01  # 1% of balance per trade, never more than 5%
+  min_stake: 1.0
+  max_stake: 25.0
+  min_payout: 0.85      # breakeven win rate at 85% payout is 54.1%
+  daily_loss_limit: 0.05
+  max_trades_per_day: 40
+  max_consecutive_losses: 4
+  cooldown_minutes: 30
+  max_open_trades: 1

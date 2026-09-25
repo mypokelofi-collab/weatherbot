@@ -39,6 +39,20 @@ says anything about live profitability.
 
 ---
 
+## pocketbot (Pocket Option / Pocket Broker)
+
+This repo also holds `pocketbot/`, a separate fixed-time (binary options) bot
+for Pocket Option. It runs paper by default, uses demo before real money, and
+refuses martingale. Research, maths and setup are in
+[docs/POCKETBOT.md](docs/POCKETBOT.md).
+
+```bash
+make pocket-sim                      # offline paper demo, no account needed
+python -m pocketbot --help
+```
+
+---
+
 ## How it decides
 
 Two systems, deliberately separate.

@@ -5,7 +5,7 @@ VENV ?= .venv
 HOST ?=
 PORT ?= 8033
 
-.PHONY: help venv test run sim backtest record docker deploy logs clean
+.PHONY: help venv test run sim backtest record docker deploy logs clean pocket-sim pocket-run pocket-backtest
 
 help:
 	@echo "make venv           create .venv and install dependencies"
@@ -17,6 +17,9 @@ help:
 	@echo "make docker         build the container image locally"
 	@echo "make deploy HOST=user@vps   deploy to a VPS over SSH"
 	@echo "make logs HOST=user@vps     tail the remote logs"
+	@echo "make pocket-sim     pocketbot offline paper demo (synthetic market)"
+	@echo "make pocket-run     pocketbot per config/pocketbot.yml mode (needs POCKETBOT_SSID)"
+	@echo "make pocket-backtest F=candles.csv   pocketbot over a candle CSV"
 
 venv:
 	$(PY) -m venv $(VENV)
@@ -37,6 +40,15 @@ record:
 
 backtest:
 	$(VENV)/bin/python -m flowbot backtest $(F) -c config/flowbot.yml
+
+pocket-sim:
+	$(VENV)/bin/python -m pocketbot sim --delay $(or $(DELAY),0.05)
+
+pocket-run:
+	$(VENV)/bin/python -m pocketbot run
+
+pocket-backtest:
+	$(VENV)/bin/python -m pocketbot backtest $(F)
 
 docker:
 	docker build -t flowbot:latest .

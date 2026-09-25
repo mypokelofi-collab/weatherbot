@@ -15,3 +15,4 @@ data/state/
 dist/
 build/
 .DS_Store
+data/pocketbot/
