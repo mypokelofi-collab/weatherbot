@@ -2,6 +2,7 @@
 
     python -m pocketbot sim                     # offline paper demo on a synthetic market
     python -m pocketbot run                     # paper/demo/live, per config `mode`
+    python -m pocketbot serve                   # the same, supervised, with a web dashboard
     python -m pocketbot assets                  # open assets and their payouts (needs SSID)
     python -m pocketbot fetch --hours 24        # save live candles to CSV (needs SSID)
     python -m pocketbot backtest FILE.csv       # run the bot over a CSV of candles
@@ -14,97 +15,32 @@ import argparse
 import asyncio
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 
-import yaml
-
-from .broker import (ListFeed, PaperBroker, PocketOptionBroker, PocketOptionFeed,
-                     SyntheticFeed, connect, ssid_is_demo)
-from .engine import Engine
+from .broker import ListFeed, PaperBroker, connect
 from .market import load_csv, save_csv, Candle
-from .risk import RiskConfig, RiskManager
+from .session import (DEFAULT_CONFIG, REAL_MONEY_ACK, guard_account, ledger_path,
+                      load_config, make_engine, open_session, ssid_from_env)
 from .stats import Ledger, Scorecard
-from .strategy import StrategyConfig
 
 log = logging.getLogger("pocketbot")
 
-REAL_MONEY_ACK = "yes-i-accept-the-risk"
-DEFAULT_CONFIG = "config/pocketbot.yml"
-
-
-def load_config(path: str | None) -> dict:
-    p = Path(path or DEFAULT_CONFIG)
-    cfg = yaml.safe_load(p.read_text()) if p.exists() else {}
-    cfg.setdefault("mode", "paper")
-    cfg.setdefault("asset", "EURUSD_otc")
-    cfg.setdefault("period", 60)
-    cfg.setdefault("expiry_candles", 3)
-    cfg.setdefault("history_hours", 3)
-    cfg.setdefault("paper", {})
-    if cfg["mode"] not in ("paper", "demo", "live"):
-        raise SystemExit(f"mode must be paper, demo or live, not {cfg['mode']!r}")
-    return cfg
-
-
-def _engine(cfg: dict, feed, broker, ledger: Ledger, **kw) -> Engine:
-    return Engine(feed=feed, broker=broker,
-                  risk=RiskManager(RiskConfig.from_dict(cfg.get("risk"))),
-                  strategy=StrategyConfig.from_dict(cfg.get("strategy")),
-                  asset=cfg["asset"], expiry_candles=int(cfg["expiry_candles"]),
-                  ledger=ledger, **kw)
-
-
-def _ssid(required: bool) -> str | None:
-    ssid = os.environ.get("POCKETBOT_SSID", "").strip()
-    if not ssid and required:
-        raise SystemExit("set POCKETBOT_SSID (see docs/POCKETBOT.md, 'Getting your SSID')")
-    return ssid or None
-
-
-def _guard_account(mode: str, ssid: str, client) -> str:
-    """Refuse any mismatch between what the config asks for and the account the SSID opens."""
-    demo = client.is_demo()
-    if ssid_is_demo(ssid) is not None and ssid_is_demo(ssid) != demo:
-        raise SystemExit("SSID isDemo flag disagrees with the account the server opened; refusing")
-    if mode == "demo" and not demo:
-        raise SystemExit("mode is demo but this SSID opens a REAL account; refusing to trade")
-    if mode == "live":
-        if demo:
-            raise SystemExit("mode is live but this SSID opens the demo account")
-        if os.environ.get("POCKETBOT_REAL_MONEY") != REAL_MONEY_ACK:
-            raise SystemExit(f"real money needs POCKETBOT_REAL_MONEY={REAL_MONEY_ACK}")
-        log.warning("REAL MONEY MODE: orders will be placed on a real account")
-    return "demo" if demo else "real"
+# Short names kept for the tests and for anyone scripting against the CLI module.
+_engine = make_engine
+_ssid = ssid_from_env
+_guard_account = guard_account
+__all__ = ["DEFAULT_CONFIG", "REAL_MONEY_ACK", "load_config", "main"]
 
 
 async def cmd_run(cfg: dict, args) -> dict:
-    mode = cfg["mode"]
-    ssid = _ssid(required=mode != "paper")
-    ledger = Ledger(cfg.get("ledger"))
-    paper = cfg["paper"]
-    if not ssid:
-        log.info("paper mode on a SYNTHETIC market (no POCKETBOT_SSID): results mean nothing")
-        feed = SyntheticFeed(int(cfg["period"]), delay=args.delay, seed=args.seed)
-        broker = PaperBroker(float(paper.get("balance", 1000)), float(paper.get("payout", 0.85)))
-        return await _engine(cfg, feed, broker, ledger).run()
+    async with open_session(cfg, synthetic_delay=args.delay, seed=args.seed) as s:
+        return await make_engine(cfg, s.feed, s.broker, Ledger(ledger_path(cfg))).run()
 
-    client = await connect(ssid, cfg.get("ws_url"))
-    try:
-        feed = PocketOptionFeed(client, cfg["asset"], int(cfg["period"]),
-                                history_hours=float(cfg["history_hours"]))
-        if mode == "paper":
-            live = PocketOptionBroker(client, "paper")
-            broker = PaperBroker(float(paper.get("balance", 1000)), live.payout)
-            log.info("paper mode on LIVE %s candles; no orders will be sent", cfg["asset"])
-        else:
-            account = _guard_account(mode, ssid, client)
-            broker = PocketOptionBroker(client, account)
-            log.info("%s account, balance %.2f", account.upper(), await broker.balance())
-        return await _engine(cfg, feed, broker, ledger).run()
-    finally:
-        await client.shutdown()
+
+async def cmd_serve(cfg: dict, args) -> None:
+    from .service import serve
+    await serve(cfg, host=args.host, port=args.port)
 
 
 async def cmd_sim(cfg: dict, args) -> dict:
@@ -155,7 +91,7 @@ async def cmd_assets(cfg: dict, args) -> None:
 
 
 def cmd_stats(cfg: dict, args) -> dict:
-    sc = Scorecard(Ledger(cfg.get("ledger")).load())
+    sc = Scorecard(Ledger(ledger_path(cfg)).load())
     return sc.summary()
 
 
@@ -174,6 +110,10 @@ def main(argv: list[str] | None = None) -> None:
     run = sub.add_parser("run", help="trade per the config mode")
     run.add_argument("--delay", type=float, default=0.2, help="synthetic feed only: s per candle")
     run.add_argument("--seed", type=int, default=None)
+
+    sv = sub.add_parser("serve", help="run the bot forever with a web dashboard")
+    sv.add_argument("--host", default=None)
+    sv.add_argument("--port", type=int, default=None)
 
     sim = sub.add_parser("sim", help="offline paper demo")
     sim.add_argument("--candles", type=int, default=3000)
@@ -202,7 +142,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "stats":
         result = cmd_stats(cfg, args)
     else:
-        fn = {"run": cmd_run, "sim": cmd_sim, "backtest": cmd_backtest,
+        fn = {"run": cmd_run, "serve": cmd_serve, "sim": cmd_sim, "backtest": cmd_backtest,
               "fetch": cmd_fetch, "assets": cmd_assets}[args.command]
         try:
             result = asyncio.run(fn(cfg, args))

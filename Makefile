@@ -5,7 +5,7 @@ VENV ?= .venv
 HOST ?=
 PORT ?= 8033
 
-.PHONY: help venv test run sim backtest record docker deploy logs clean pocket-sim pocket-run pocket-backtest
+.PHONY: help venv test run sim backtest record docker deploy logs clean pocket-sim pocket-run pocket-serve pocket-backtest pocket-deploy
 
 help:
 	@echo "make venv           create .venv and install dependencies"
@@ -19,7 +19,9 @@ help:
 	@echo "make logs HOST=user@vps     tail the remote logs"
 	@echo "make pocket-sim     pocketbot offline paper demo (synthetic market)"
 	@echo "make pocket-run     pocketbot per config/pocketbot.yml mode (needs POCKETBOT_SSID)"
+	@echo "make pocket-serve   pocketbot with its dashboard on :8040"
 	@echo "make pocket-backtest F=candles.csv   pocketbot over a candle CSV"
+	@echo "make pocket-deploy HOST=user@vps     pocketbot + dashboard on a VPS (port 8040)"
 
 venv:
 	$(PY) -m venv $(VENV)
@@ -46,6 +48,13 @@ pocket-sim:
 
 pocket-run:
 	$(VENV)/bin/python -m pocketbot run
+
+pocket-serve:
+	$(VENV)/bin/python -m pocketbot serve
+
+pocket-deploy:
+	@test -n "$(HOST)" || (echo "usage: make pocket-deploy HOST=user@your-vps"; exit 1)
+	./scripts/deploy-pocketbot.sh $(HOST)
 
 pocket-backtest:
 	$(VENV)/bin/python -m pocketbot backtest $(F)

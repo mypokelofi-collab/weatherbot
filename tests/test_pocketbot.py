@@ -9,6 +9,7 @@ import types
 import pytest
 
 from pocketbot import __main__ as cli
+from pocketbot import broker as broker_mod
 from pocketbot.broker import ListFeed, PaperBroker, PocketOptionBroker, ssid_is_demo
 from pocketbot.engine import Engine
 from pocketbot.market import Candle, load_csv, save_csv, synthetic_candles
@@ -274,7 +275,7 @@ def test_demo_run_end_to_end_with_fake_client(monkeypatch, tmp_path):
     async def fake_connect(ssid, ws_url=None, timeout=60.0):
         return client
 
-    monkeypatch.setattr(cli, "connect", fake_connect)
+    monkeypatch.setattr(broker_mod, "connect", fake_connect)
     monkeypatch.setenv("POCKETBOT_SSID", DEMO_SSID)
     cfg = cli.load_config(None)
     cfg.update(mode="demo", ledger=str(tmp_path / "t.jsonl"))
@@ -283,3 +284,102 @@ def test_demo_run_end_to_end_with_fake_client(monkeypatch, tmp_path):
     assert all(o[3] == 180 for o in client.orders)          # 3 x 60s candles
     assert s["trades"] >= 1 and s["wins"] == s["trades"]    # FakeClient always wins
     assert len(cli.Ledger(tmp_path / "t.jsonl").load()) == s["trades"]
+
+
+# ------------------------------------------------------------- dashboard
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from pocketbot.monitor import Monitor  # noqa: E402
+from pocketbot.server import create_app  # noqa: E402
+from pocketbot.service import Service  # noqa: E402
+
+
+def make_monitor():
+    return Monitor("paper", "X", 60, 3, "reversion", Scorecard(), RiskManager(RiskConfig()))
+
+
+def test_dashboard_api_needs_the_token():
+    mon = make_monitor()
+    client = TestClient(create_app(mon, "s3cret"))
+    assert client.get("/api/health").json()["ok"] is True       # liveness stays open
+    assert client.get("/").status_code == 200                   # the page holds no data
+    assert client.get("/api/state").status_code == 401
+    assert client.get("/api/state?token=wrong").status_code == 401
+    assert client.get("/api/state?token=s3cret").json()["asset"] == "X"
+    hdr = {"Authorization": "Bearer s3cret"}
+    assert client.get("/api/state", headers=hdr).status_code == 200
+    assert client.post("/api/control/pause").status_code == 401
+    assert client.post("/api/control/pause", headers=hdr).json()["paused"] is True
+    assert mon.paused
+    client.post("/api/control/resume", headers=hdr)
+    assert not mon.paused
+    assert client.post("/api/control/flatten", headers=hdr).status_code == 404
+
+
+def test_paused_monitor_blocks_entries_but_not_settlement():
+    mon = make_monitor()
+    mon.paused = True
+    cfg = {"risk": {"max_trades_per_day": 10**6}, "asset": "X", "expiry_candles": 3}
+    eng = cli._engine(cfg, ListFeed(synthetic_candles(3000, 60, seed=7), 60),
+                      PaperBroker(1000, 0.85), cli.Ledger(None), quiet=True, monitor=mon)
+    s = run(eng.run())
+    assert s["trades"] == 0 and mon.last_skip["reason"] == "paused from the dashboard"
+    snap = mon.snapshot()
+    assert snap["status"] == "running" and len(snap["candles"]) == 150
+
+
+def test_engine_fills_the_monitor():
+    mon = make_monitor()
+    cfg = {"risk": {"max_trades_per_day": 10**6}, "asset": "X", "expiry_candles": 3}
+    eng = cli._engine(cfg, ListFeed(synthetic_candles(3000, 60, seed=7), 60),
+                      PaperBroker(1000, 0.85), cli.Ledger(None), quiet=True, monitor=mon,
+                      scorecard=mon.scorecard, risk=mon.risk)
+    s = run(eng.run())
+    snap = mon.snapshot()
+    assert s["trades"] > 0 and snap["summary"]["trades"] == s["trades"]
+    assert snap["equity"] and snap["balance"] == snap["equity"][-1][1]
+    assert snap["signal"]["reason"]
+
+
+def test_service_survives_a_bad_session_and_reports_it(monkeypatch):
+    # A demo-mode SSID that opens a real account must not crash the service:
+    # the dashboard shows the refusal and the supervisor waits to retry.
+    monkeypatch.setenv("POCKETBOT_SSID", DEMO_SSID)
+
+    class Shutdownable(FakeClient):
+        async def shutdown(self):
+            pass
+
+    async def fake_connect(ssid, ws_url=None, timeout=60.0):
+        return Shutdownable(demo=False)
+
+    monkeypatch.setattr(broker_mod, "connect", fake_connect)
+    cfg = cli.load_config(None)
+    cfg.update(mode="demo", ledger=None)
+    svc = Service(cfg)
+
+    async def go():
+        task = asyncio.create_task(svc.run_forever())
+        await asyncio.sleep(0.2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    run(go())
+    assert svc.monitor.connects == 1
+    assert "disagrees" in svc.monitor.error or "REAL account" in svc.monitor.error
+
+
+def test_service_restores_paper_balance_and_stats_from_ledger(tmp_path, monkeypatch):
+    monkeypatch.setenv("POCKETBOT_SSID", DEMO_SSID)   # a real session, so the ledger is used
+    path = tmp_path / "trades-paper.jsonl"
+    led = cli.Ledger(path)
+    for i, res in enumerate(["win", "loss", "win"]):
+        t = Trade(str(i), "X", CALL, 10.0, 0.8, 0, 60, account="paper")
+        t.settle(res)
+        led.append(t)
+    cfg = cli.load_config(None)
+    cfg.update(mode="paper", ledger=str(tmp_path / "trades-{mode}.jsonl"))
+    svc = Service(cfg)
+    assert svc.scorecard.summary()["trades"] == 3
+    assert run(svc.paper.balance()) == pytest.approx(1000 + 8 - 10 + 8)

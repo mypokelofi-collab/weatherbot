@@ -1,1 +1,1 @@
-binaryoptionstoolsv2>=0.2.15
+binaryoptionstoolsv2==0.2.15

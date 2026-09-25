@@ -9,6 +9,7 @@ clears breakeven.
 from __future__ import annotations
 
 import json
+import logging
 import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -93,13 +94,20 @@ class Ledger:
     def __init__(self, path: str | Path | None):
         self.path = Path(path) if path else None
         if self.path:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                logging.getLogger("pocketbot").error("ledger directory unusable: %s", exc)
 
     def append(self, t: Trade) -> None:
         if not self.path:
             return
-        with open(self.path, "a") as fh:
-            fh.write(json.dumps(asdict(t)) + "\n")
+        # A full disk or a permissions slip must never stop the bot settling trades.
+        try:
+            with open(self.path, "a") as fh:
+                fh.write(json.dumps(asdict(t)) + "\n")
+        except OSError as exc:
+            logging.getLogger("pocketbot").error("could not write the ledger: %s", exc)
 
     def load(self) -> list[Trade]:
         if not self.path or not self.path.exists():

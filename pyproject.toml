@@ -28,6 +28,7 @@ include = ["flowbot*", "pocketbot*"]
 
 [tool.setuptools.package-data]
 "flowbot.server" = ["dashboard/*"]
+"pocketbot" = ["dashboard/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

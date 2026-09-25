@@ -15,7 +15,14 @@ period: 60              # candle size in seconds (1, 5, 15, 30, 60, 300 ...)
 expiry_candles: 3       # trade duration = period * expiry_candles (here 3 minutes)
 history_hours: 3
 ws_url: null            # override the websocket endpoint if the default regions fail
-ledger: data/pocketbot/trades.jsonl
+ledger: data/pocketbot/trades-{mode}.jsonl   # one ledger per mode, so demo and real never mix
+
+# `pocketbot serve` - the supervised bot plus its web dashboard.
+# POCKETBOT_HOST / POCKETBOT_PORT / POCKETBOT_DASHBOARD_TOKEN override these.
+server:
+  host: 127.0.0.1
+  port: 8040
+synthetic_delay: 2.0    # seconds per candle when there is no SSID (demo only)
 
 paper:
   balance: 1000

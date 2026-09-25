@@ -1,0 +1,39 @@
+# pocketbot on a VPS, alongside (never instead of) flowbot.
+#
+#   docker compose -f docker-compose.pocket.yml up -d --build
+#
+# scripts/deploy-pocketbot.sh installs it into its own directory
+# (/opt/pocketbot) and writes COMPOSE_FILE=docker-compose.pocket.yml into that
+# directory's .env, so a plain `docker compose ...` there targets this file.
+#
+# .env on the host holds:
+#   POCKETBOT_DASHBOARD_TOKEN   gates the dashboard (the deploy generates one)
+#   POCKETBOT_MODE              paper | demo | live
+#   POCKETBOT_SSID              optional; without it the bot runs a synthetic market
+#   POCKETBOT_REAL_MONEY        only for live mode; see docs/POCKETBOT.md
+
+# Pinned so it can never be confused with flowbot's compose project.
+name: pocketbot
+
+services:
+  pocketbot:
+    build:
+      context: .
+      dockerfile: Dockerfile.pocket
+    image: pocketbot:latest
+    container_name: ${POCKET_CONTAINER_NAME:-pocketbot}
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "${POCKET_BIND_ADDR:-0.0.0.0}:${POCKET_HOST_PORT:-8040}:8040"
+    volumes:
+      # Trade ledgers survive redeploys.
+      - ./data/pocketbot:/app/data/pocketbot
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    stop_grace_period: 15s

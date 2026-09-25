@@ -48,7 +48,8 @@ refuses martingale. Research, maths and setup are in
 
 ```bash
 make pocket-sim                      # offline paper demo, no account needed
-python -m pocketbot --help
+make pocket-serve                    # bot + dashboard on http://localhost:8040
+make pocket-deploy HOST=user@vps     # or Actions -> Deploy to VPS -> app: pocketbot
 ```
 
 ---

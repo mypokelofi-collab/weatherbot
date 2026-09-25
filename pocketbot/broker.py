@@ -14,6 +14,7 @@ import asyncio
 import itertools
 import json
 import logging
+from collections import deque
 from typing import AsyncIterator, Callable, Iterable, Protocol
 
 from .market import Candle, synthetic_candles
@@ -48,12 +49,31 @@ class ListFeed:
                 await asyncio.sleep(self.delay)
 
 
-class SyntheticFeed(ListFeed):
-    """An endless-ish random walk for offline demos. Contains no edge."""
+class SyntheticFeed:
+    """A random walk for offline demos, generated lazily. Contains no edge.
 
-    def __init__(self, period: int = 60, n: int = 5000, seed: int | None = None,
-                 delay: float = 0.2, window: int = 300):
-        super().__init__(synthetic_candles(n, period, seed), period, window, delay)
+    n=None runs forever, which is what the dashboard service uses when no
+    SSID is configured.
+    """
+
+    def __init__(self, period: int = 60, n: int | None = 5000, seed: int | None = None,
+                 delay: float = 0.2, window: int = 300, start_time: int | None = None):
+        self.period = period
+        self.start_time = start_time
+        self.n = n
+        self.seed = seed
+        self.delay = delay
+        self.window = window
+
+    async def __aiter__(self):
+        buf: deque[Candle] = deque(maxlen=self.window)
+        count = self.n if self.n is not None else 10**12
+        kw = {"start_time": self.start_time} if self.start_time else {}
+        for c in synthetic_candles(count, self.period, self.seed, **kw):
+            buf.append(c)
+            yield list(buf)
+            if self.delay:
+                await asyncio.sleep(self.delay)
 
 
 class PocketOptionFeed:

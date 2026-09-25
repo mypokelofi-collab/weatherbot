@@ -10,6 +10,12 @@
 #   VPS_SSH_KEY       the PRIVATE key, whole file including BEGIN/END lines
 #   DASHBOARD_TOKEN   any long random string; it gates the dashboard
 #
+# For pocketbot (app: pocketbot) the same VPS secrets apply, plus optionally:
+#   POCKETBOT_SSID    the Pocket Option session string, 42["auth",{...}]
+#                     Without it the bot runs a labelled synthetic market.
+#   POCKETBOT_DASHBOARD_TOKEN   gates the pocketbot dashboard; if unset,
+#                     DASHBOARD_TOKEN is used for it too.
+#
 # Then: Actions -> "Deploy to VPS" -> Run workflow.
 #
 # Manual trigger only. Nothing deploys on a push.
@@ -19,6 +25,19 @@ name: Deploy to VPS
 on:
   workflow_dispatch:
     inputs:
+      app:
+        description: "Which bot to deploy"
+        type: choice
+        default: flowbot
+        options: [flowbot, pocketbot]
+      pocket_mode:
+        description: "pocketbot only: paper (no orders) or demo (Pocket Option demo account). Real money is never set from here."
+        type: choice
+        default: paper
+        options: [paper, demo]
+      pocket_asset:
+        description: "pocketbot only: asset symbol, blank keeps the current one"
+        default: ""
       venue:
         description: "Market data venue"
         type: choice
@@ -30,11 +49,11 @@ on:
         default: "0.0.0.0"
         options: ["0.0.0.0", "127.0.0.1"]
       port:
-        description: "Host port for the dashboard"
-        default: "8033"
+        description: "Host port for the dashboard (blank: 8033 flowbot, 8040 pocketbot)"
+        default: ""
       path:
-        description: "Install directory on the VPS"
-        default: "/opt/flowbot"
+        description: "Install directory on the VPS (blank: /opt/flowbot or /opt/pocketbot)"
+        default: ""
 
 concurrency:
   group: deploy-vps
@@ -51,11 +70,18 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements-dev.txt
       - run: python -m pytest -q
+      - name: Build the pocketbot image
+        if: inputs.app == 'pocketbot'
+        run: docker build -f Dockerfile.pocket -t pocketbot:ci .
 
   deploy:
     name: Deploy
     needs: test
     runs-on: ubuntu-latest
+    env:
+      APP: ${{ inputs.app }}
+      PORT: ${{ inputs.port != '' && inputs.port || (inputs.app == 'pocketbot' && '8040' || '8033') }}
+      DEST: ${{ inputs.path != '' && inputs.path || (inputs.app == 'pocketbot' && '/opt/pocketbot' || '/opt/flowbot') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -70,7 +96,9 @@ jobs:
           [ -n "$HOST" ]      || missing="$missing VPS_HOST"
           [ -n "$USER_NAME" ] || missing="$missing VPS_USER"
           [ -n "$KEY" ]       || missing="$missing VPS_SSH_KEY"
-          [ -n "$TOKEN" ]     || missing="$missing DASHBOARD_TOKEN"
+          if [ "$APP" = flowbot ]; then
+            [ -n "$TOKEN" ]   || missing="$missing DASHBOARD_TOKEN"
+          fi
           if [ -n "$missing" ]; then
             echo "::error::missing repository secrets:$missing"
             exit 1
@@ -95,18 +123,39 @@ jobs:
           CFG
           chmod 600 ~/.ssh/config
 
-      - name: Deploy
+      - name: Deploy flowbot
+        if: inputs.app == 'flowbot'
         env:
           HOST: ${{ secrets.VPS_HOST }}
           USER_NAME: ${{ secrets.VPS_USER }}
           TOKEN: ${{ secrets.DASHBOARD_TOKEN }}
         run: |
           ./scripts/deploy.sh "$USER_NAME@$HOST" \
-            --path  "${{ inputs.path }}" \
-            --port  "${{ inputs.port }}" \
+            --path  "$DEST" \
+            --port  "$PORT" \
             --bind  "${{ inputs.bind }}" \
             --venue "${{ inputs.venue }}" \
             --token "$TOKEN"
+
+      - name: Deploy pocketbot
+        if: inputs.app == 'pocketbot'
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          USER_NAME: ${{ secrets.VPS_USER }}
+          # Read from the environment by the script, never passed as an argument.
+          POCKETBOT_SSID: ${{ secrets.POCKETBOT_SSID }}
+          # Falls back to the flowbot dashboard token, so you already know it.
+          POCKET_TOKEN: ${{ secrets.POCKETBOT_DASHBOARD_TOKEN || secrets.DASHBOARD_TOKEN }}
+          POCKET_ASSET: ${{ inputs.pocket_asset }}
+        run: |
+          set -o pipefail
+          args=(--path "$DEST" --port "$PORT" --bind "${{ inputs.bind }}" --mode "${{ inputs.pocket_mode }}")
+          [ -n "$POCKET_TOKEN" ] && args+=(--token "$POCKET_TOKEN")
+          [ -n "$POCKET_ASSET" ] && args+=(--asset "$POCKET_ASSET")
+          # The script prints the dashboard URL with its token; keep that out of
+          # the public log and put a masked copy in the job summary instead.
+          ./scripts/deploy-pocketbot.sh "$USER_NAME@$HOST" "${args[@]}" \
+            | sed -E 's/(token=)[0-9a-zA-Z]+/\1***/g'
 
       - name: Report what is running
         if: always()
@@ -114,13 +163,16 @@ jobs:
           HOST: ${{ secrets.VPS_HOST }}
           USER_NAME: ${{ secrets.VPS_USER }}
         run: |
-          echo "### flowbot deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "### $APP deployment" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           ssh -o BatchMode=yes "$USER_NAME@$HOST" \
-            "cd '${{ inputs.path }}' && docker compose ps && docker compose logs --tail 40" \
+            "cd '$DEST' && docker compose ps && docker compose logs --tail 40" \
             >> "$GITHUB_STEP_SUMMARY" 2>&1 || echo "could not reach the host" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "Dashboard: http://${HOST}:${{ inputs.port }}/?token=<DASHBOARD_TOKEN>" >> "$GITHUB_STEP_SUMMARY"
+          echo "Dashboard: http://${HOST}:${PORT}/?token=<the dashboard token>" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$APP" = pocketbot ]; then
+            echo "The token is your POCKETBOT_DASHBOARD_TOKEN secret, or DASHBOARD_TOKEN if that is unset." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Clean up the key
         if: always()

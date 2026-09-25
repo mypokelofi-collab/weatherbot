@@ -138,7 +138,57 @@ trade on your account; log out of the browser session to invalidate it.
    `POCKETBOT_REAL_MONEY=yes-i-accept-the-risk` and an SSID with `isDemo: 0`, and it
    will refuse any mismatch between the two.
 
-## 6. Honest expectations
+## 6. Dashboard and VPS
+
+`python -m pocketbot serve` (or `make pocket-serve`) runs the bot under a
+supervisor with a web dashboard on port 8040. The dashboard shows:
+
+- the connection state and which account is live (PAPER, DEMO or a red REAL MONEY badge)
+- balance, P&L, win rate against the breakeven rate with its 95% range, and the verdict
+- the price chart with Bollinger bands and every entry marked as won, lost or open
+- the latest signal and why it did or didn't trade, and today's risk limits
+- open trades, recent trades and the bot's activity log
+
+It has one control: **Pause entries**. Pausing stops new trades and lets open
+ones settle. Nothing on the page can place or close a trade.
+
+The supervisor never exits because of the broker. A dropped connection, an
+expired SSID or a refused account check shows up as a red banner saying why,
+and it retries with backoff. Trade ledgers are kept per mode in
+`data/pocketbot/trades-<mode>.jsonl`, and stats and the paper balance survive
+restarts.
+
+### Deploying next to flowbot
+
+pocketbot has its own directory (`/opt/pocketbot`), compose project
+(`pocketbot`), container and port (8040), so it never touches a flowbot
+deployment on the same server.
+
+**From GitHub (no SSH needed on your side):** Actions → *Deploy to VPS* →
+Run workflow → `app: pocketbot`. It uses the same `VPS_HOST`, `VPS_USER` and
+`VPS_SSH_KEY` secrets as flowbot. Optional extra secrets:
+
+| Secret | Purpose |
+|---|---|
+| `POCKETBOT_SSID` | Your Pocket Option session string. Without it the bot runs a labelled synthetic market. |
+| `POCKETBOT_DASHBOARD_TOKEN` | Dashboard password. Defaults to `DASHBOARD_TOKEN`. |
+
+Choose `pocket_mode: paper` (live prices, no orders) or `demo` (orders on the
+demo account). Real-money mode can't be set from a deploy.
+
+**From a machine with SSH access:**
+
+```bash
+POCKETBOT_SSID='42["auth",{...}]' ./scripts/deploy-pocketbot.sh root@your-vps --mode demo
+```
+
+Then open `http://your-vps:8040/?token=<token>`.
+
+**Replacing an expired SSID:** update the `POCKETBOT_SSID` secret and re-run
+the workflow, or edit `/opt/pocketbot/.env` on the server and run
+`docker compose up -d` there.
+
+## 7. Honest expectations
 
 Nothing found in this research (GitHub bots, PyPI clients, Reddit threads,
 TradingView posts, Trustpilot reviews) showed a verified, independently audited

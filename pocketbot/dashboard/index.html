@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pocketbot</title>
+<link rel="icon" href="data:,">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+  --s1: #2a78d6; --band: rgba(42,120,214,0.10);
+  --up: #2a78d6; --down: #e34948;
+  --good: #0ca30c; --good-ink: #006300; --warn: #fab219; --crit: #d03b3b;
+  --chip: #f0efec;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+    --s1: #3987e5; --band: rgba(57,135,229,0.14);
+    --up: #3987e5; --down: #e66767; --good-ink: #0ca30c; --chip: #262624;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+  --s1: #3987e5; --band: rgba(57,135,229,0.14);
+  --up: #3987e5; --down: #e66767; --good-ink: #0ca30c; --chip: #262624;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1280px; margin: 0 auto; padding: 16px; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; }
+h1 { font-size: 18px; margin: 0 8px 0 0; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+  background: var(--chip); color: var(--ink-2); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.chip.real { background: var(--crit); color: #fff; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.dot.running { background: var(--good); } .dot.error { background: var(--crit); } .dot.connecting { background: var(--warn); }
+.spacer { flex: 1; }
+button { font: inherit; font-weight: 600; padding: 6px 14px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface); color: var(--ink); }
+button:hover { border-color: var(--ink-2); }
+.banner { padding: 10px 14px; border-radius: 10px; margin-bottom: 12px; border: 1px solid var(--border);
+  background: var(--surface); display: none; }
+.banner.show { display: block; }
+.banner b { margin-right: 6px; }
+.banner.err { border-left: 4px solid var(--crit); }
+.banner.info { border-left: 4px solid var(--warn); }
+.grid { display: grid; gap: 12px; }
+.kpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 12px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; min-width: 0; }
+.card h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 8px;
+  text-transform: uppercase; letter-spacing: .04em; }
+.kpi .v { font-size: 26px; font-weight: 700; }
+.kpi .s { color: var(--ink-2); font-size: 12px; margin-top: 2px; }
+.pos { color: var(--good-ink); } .neg { color: var(--crit); }
+.main { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+@media (max-width: 900px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.tip { position: absolute; pointer-events: none; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; font-size: 12px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.12); display: none; white-space: nowrap; z-index: 2;
+  font-variant-numeric: tabular-nums; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+.legend i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
+dt { color: var(--muted); } dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.sig { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+.reason { color: var(--ink-2); font-size: 13px; margin-bottom: 10px; }
+.bar { height: 6px; background: var(--chip); border-radius: 3px; overflow: hidden; margin: 2px 0 8px; }
+.bar > span { display: block; height: 100%; background: var(--s1); border-radius: 3px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--grid); }
+td { padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+td.r, th.r { text-align: right; }
+.tablewrap { overflow-x: auto; }
+.res { font-weight: 700; }
+.res.win { color: var(--good-ink); } .res.loss { color: var(--crit); } .res.draw, .res.open { color: var(--ink-2); }
+.events { max-height: 300px; overflow-y: auto; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.events div { padding: 2px 0; border-bottom: 1px solid var(--grid); overflow-wrap: anywhere; }
+.events .t { color: var(--muted); margin-right: 8px; }
+.events .error, .events .warning { color: var(--crit); }
+.row2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); margin-top: 12px; }
+@media (max-width: 900px) { .row2 { grid-template-columns: minmax(0, 1fr); } }
+.empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+#login { max-width: 380px; margin: 12vh auto; display: none; }
+#login input { width: 100%; font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--page); color: var(--ink); margin: 8px 0; }
+.foot { color: var(--muted); font-size: 12px; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div id="login" class="card">
+  <h2>Dashboard token</h2>
+  <div class="reason">This dashboard is protected. Paste the token the deploy printed
+    (or open the link it gave you, which carries <code>?token=</code>).</div>
+  <form id="loginform"><input id="tokin" type="password" autocomplete="off" placeholder="token">
+  <button type="submit">Open</button></form>
+</div>
+
+<main id="app" hidden>
+  <header>
+    <h1>pocketbot</h1>
+    <span class="chip" id="c-mode">-</span>
+    <span class="chip" id="c-feed">-</span>
+    <span class="chip"><span class="dot" id="c-dot"></span><span id="c-status">-</span></span>
+    <span class="chip" id="c-asset">-</span>
+    <span class="spacer"></span>
+    <button id="pause" type="button">Pause entries</button>
+  </header>
+
+  <div class="banner err" id="b-error"><b>Not connected.</b><span id="b-error-t"></span></div>
+  <div class="banner info" id="b-synth"><b>Synthetic market.</b>No POCKETBOT_SSID is set, so this is a random
+    walk with paper money. It has no edge by construction, and its results say nothing about Pocket Option.</div>
+  <div class="banner info" id="b-paused"><b>Entries paused.</b>Open trades will still settle. New signals are logged but not traded.</div>
+
+  <section class="grid kpis">
+    <div class="card kpi"><h2>Balance</h2><div class="v" id="k-bal">-</div><div class="s" id="k-bal-s">-</div></div>
+    <div class="card kpi"><h2>Total P&amp;L</h2><div class="v" id="k-pnl">-</div><div class="s" id="k-pnl-s">-</div></div>
+    <div class="card kpi"><h2>Win rate</h2><div class="v" id="k-wr">-</div><div class="s" id="k-wr-s">-</div></div>
+    <div class="card kpi"><h2>Trades</h2><div class="v" id="k-n">-</div><div class="s" id="k-n-s">-</div></div>
+    <div class="card kpi"><h2>Verdict</h2><div class="s" id="k-verdict" style="font-size:14px;color:var(--ink)">-</div></div>
+  </section>
+
+  <section class="grid main">
+    <div class="card">
+      <h2 id="price-title">Price</h2>
+      <div class="chart" id="price"></div>
+      <div class="legend">
+        <span><i style="background:var(--up)"></i>Up candle</span>
+        <span><i style="background:var(--down)"></i>Down candle</span>
+        <span><i style="background:var(--band);height:10px"></i>Bollinger band</span>
+        <span>▲ CALL / ▼ PUT entries: <b class="res win">won</b> · <b class="res loss">lost</b> · <b class="res open">open</b></span>
+      </div>
+    </div>
+    <div class="grid" style="align-content:start">
+      <div class="card">
+        <h2>Latest signal</h2>
+        <div class="sig" id="s-dir">-</div>
+        <div class="reason" id="s-reason">-</div>
+        <dl id="s-feat"></dl>
+        <div class="reason" id="s-skip" style="margin:10px 0 0"></div>
+      </div>
+      <div class="card">
+        <h2>Risk today</h2>
+        <dl>
+          <dt>Day P&amp;L vs loss limit</dt><dd id="r-pnl">-</dd>
+        </dl>
+        <div class="bar"><span id="r-pnl-bar" style="width:0"></span></div>
+        <dl>
+          <dt>Trades vs daily cap</dt><dd id="r-trades">-</dd>
+        </dl>
+        <div class="bar"><span id="r-trades-bar" style="width:0"></span></div>
+        <dl>
+          <dt>Losses in a row</dt><dd id="r-streak">-</dd>
+          <dt>Payout now</dt><dd id="r-payout">-</dd>
+          <dt>Breakeven win rate</dt><dd id="r-be">-</dd>
+          <dt>State</dt><dd id="r-state">-</dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <section class="grid row2">
+    <div class="card">
+      <h2>Balance over time</h2>
+      <div class="chart" id="equity"></div>
+    </div>
+    <div class="card">
+      <h2>Open trades</h2>
+      <div id="open"></div>
+    </div>
+  </section>
+
+  <section class="grid row2">
+    <div class="card">
+      <h2>Recent trades</h2>
+      <div class="tablewrap" id="trades"></div>
+    </div>
+    <div class="card">
+      <h2>Activity</h2>
+      <div class="events" id="events"></div>
+    </div>
+  </section>
+  <div class="foot" id="foot"></div>
+</main>
+
+<div class="tip" id="tip"></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { sessionStorage.setItem(k, v); } catch {} },
+  };
+  const params = new URLSearchParams(location.search);
+  let token = params.get("token") || store.get("pb_token") || "";
+  if (params.get("token")) {
+    store.set("pb_token", token);
+    history.replaceState(null, "", location.pathname);      // keep the token out of screenshots
+  }
+
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs = {}, parent) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    if (parent) parent.appendChild(n);
+    return n;
+  };
+  const fmt = (x, d = 2) => (x == null || isNaN(x)) ? "-" : Number(x).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+  const pct = (x, d = 1) => x == null ? "-" : (x * 100).toFixed(d) + "%";
+  const signed = (x) => x == null ? "-" : (x > 0 ? "+" : "") + fmt(x);
+  const cls = (x) => x > 0 ? "pos" : x < 0 ? "neg" : "";
+  const hhmm = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const hhmmss = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+  const tip = $("tip");
+  function showTip(host, x, y, html) {
+    tip.innerHTML = html;
+    tip.style.display = "block";
+    const r = host.getBoundingClientRect();
+    let left = r.left + window.scrollX + x + 14;
+    const w = tip.offsetWidth;
+    if (left + w > window.scrollX + document.documentElement.clientWidth - 8) left = r.left + window.scrollX + x - w - 14;
+    tip.style.left = left + "px";
+    tip.style.top = (r.top + window.scrollY + y - 10) + "px";
+  }
+  const hideTip = () => { tip.style.display = "none"; };
+
+  // ---- price chart: candles, Bollinger band, trade markers ---------------
+  function drawPrice(state) {
+    const host = $("price");
+    const candles = state.candles || [];
+    host.innerHTML = "";
+    if (candles.length < 2) { host.innerHTML = '<div class="empty">Waiting for candles…</div>'; return; }
+    const W = Math.max(300, host.clientWidth || 760), H = W < 600 ? 240 : 320, L = 8, R = 64, T = 10, B = 24;
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "price chart" }, host);
+    const closes = candles.map((c) => c.close);
+    const n = 20, k = 2.2, band = candles.map((_, i) => {
+      if (i < n - 1) return null;
+      const w = closes.slice(i - n + 1, i + 1), m = w.reduce((a, b) => a + b, 0) / n;
+      const sd = Math.sqrt(w.reduce((a, b) => a + (b - m) ** 2, 0) / (n - 1));
+      return [m - k * sd, m + k * sd];
+    });
+    let lo = Math.min(...candles.map((c) => c.low)), hi = Math.max(...candles.map((c) => c.high));
+    band.forEach((b) => { if (b) { lo = Math.min(lo, b[0]); hi = Math.max(hi, b[1]); } });
+    const pad = (hi - lo) * 0.06 || 1e-4; lo -= pad; hi += pad;
+    const t0 = candles[0].time, per = state.period || 60, t1 = candles[candles.length - 1].time + per;
+    const x = (t) => L + (t - t0) / (t1 - t0) * (W - L - R);
+    const y = (p) => T + (hi - p) / (hi - lo) * (H - T - B);
+    const cw = Math.max(1.5, (W - L - R) / candles.length * 0.62);
+
+    for (let i = 0; i <= 4; i++) {
+      const p = lo + (hi - lo) * i / 4, yy = y(p);
+      el("line", { x1: L, x2: W - R, y1: yy, y2: yy, stroke: "var(--grid)", "stroke-width": 1 }, svg);
+      const t = el("text", { x: W - R + 6, y: yy + 4, fill: "var(--muted)", "font-size": 11 }, svg);
+      t.textContent = p.toFixed(5);
+    }
+    const step = Math.max(1, Math.ceil(candles.length / Math.max(2, Math.floor((W - L - R) / 80))));
+    candles.forEach((c, i) => {
+      const lx = x(c.time + per / 2);
+      if (i % step || lx < L + 24 || lx > W - R - 24) return;
+      const t = el("text", { x: lx, y: H - 6, fill: "var(--muted)", "font-size": 11, "text-anchor": "middle" }, svg);
+      t.textContent = hhmm(c.time);
+    });
+
+    const pts = band.map((b, i) => b && [x(candles[i].time + per / 2), b]).filter(Boolean);
+    if (pts.length > 1) {
+      const d = pts.map(([xx, b], i) => `${i ? "L" : "M"}${xx},${y(b[1])}`).join("") +
+                pts.slice().reverse().map(([xx, b]) => `L${xx},${y(b[0])}`).join("") + "Z";
+      el("path", { d, fill: "var(--band)", stroke: "none" }, svg);
+    }
+
+    candles.forEach((c) => {
+      const up = c.close >= c.open, col = up ? "var(--up)" : "var(--down)", cx = x(c.time + per / 2);
+      el("line", { x1: cx, x2: cx, y1: y(c.high), y2: y(c.low), stroke: col, "stroke-width": 1 }, svg);
+      const top = y(Math.max(c.open, c.close)), h = Math.max(1, Math.abs(y(c.open) - y(c.close)));
+      el("rect", { x: cx - cw / 2, y: top, width: cw, height: h, fill: col, rx: Math.min(1.5, cw / 3) }, svg);
+    });
+
+    const trades = [...(state.open_trades || []), ...(state.trades || [])]
+      .filter((t) => t.entry != null && t.opened_at >= t0 && t.opened_at <= t1 + per);
+    trades.forEach((t) => {
+      const cx = x(t.opened_at), cy = y(t.entry), call = t.direction === "call";
+      const col = t.result === "win" ? "var(--good)" : t.result === "loss" ? "var(--crit)" : "var(--ink-2)";
+      const s = 7, d = call ? `M${cx},${cy + 3}l${-s},${s * 1.5}h${2 * s}z` : `M${cx},${cy - 3}l${-s},${-s * 1.5}h${2 * s}z`;
+      el("path", { d, fill: col, stroke: "var(--surface)", "stroke-width": 2 }, svg);
+    });
+
+    const cross = el("line", { y1: T, y2: H - B, stroke: "var(--axis)", "stroke-width": 1, visibility: "hidden" }, svg);
+    const hit = el("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent" }, svg);
+    hit.addEventListener("mousemove", (ev) => {
+      const r = svg.getBoundingClientRect(), vx = (ev.clientX - r.left) / r.width * W;
+      const t = t0 + (vx - L) / (W - L - R) * (t1 - t0);
+      const i = Math.max(0, Math.min(candles.length - 1, Math.floor((t - t0) / per)));
+      const c = candles[i], cx = x(c.time + per / 2);
+      cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.setAttribute("visibility", "visible");
+      const here = trades.filter((tr) => tr.opened_at >= c.time && tr.opened_at < c.time + per + 1);
+      const extra = here.map((tr) => `<br><b>${tr.direction.toUpperCase()}</b> ${fmt(tr.stake)} · ${tr.result}${tr.result !== "open" ? " " + signed(tr.pnl) : ""}`).join("");
+      showTip(host, (cx / W) * r.width, ((ev.clientY - r.top)), `${hhmm(c.time)}<br>O ${c.open.toFixed(5)} H ${c.high.toFixed(5)}<br>L ${c.low.toFixed(5)} C ${c.close.toFixed(5)}${extra}`);
+    });
+    hit.addEventListener("mouseleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+  }
+
+  // ---- equity chart ------------------------------------------------------
+  function drawEquity(state) {
+    const host = $("equity");
+    host.innerHTML = "";
+    const pts = state.equity || [];
+    if (pts.length < 2) { host.innerHTML = '<div class="empty">The line starts once trades settle.</div>'; return; }
+    const W = Math.max(300, host.clientWidth || 520), H = 200, L = 8, R = 64, T = 10, B = 22;
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "balance over time" }, host);
+    const vals = pts.map((p) => p[1]);
+    let lo = Math.min(...vals), hi = Math.max(...vals);
+    const pad = (hi - lo) * 0.1 || 1; lo -= pad; hi += pad;
+    const x = (i) => L + i / (pts.length - 1) * (W - L - R);
+    const y = (v) => T + (hi - v) / (hi - lo) * (H - T - B);
+    for (let i = 0; i <= 3; i++) {
+      const v = lo + (hi - lo) * i / 3, yy = y(v);
+      el("line", { x1: L, x2: W - R, y1: yy, y2: yy, stroke: "var(--grid)", "stroke-width": 1 }, svg);
+      el("text", { x: W - R + 6, y: yy + 4, fill: "var(--muted)", "font-size": 11 }, svg).textContent = fmt(v, 0);
+    }
+    el("path", { d: vals.map((v, i) => `${i ? "L" : "M"}${x(i)},${y(v)}`).join(""), fill: "none",
+      stroke: "var(--s1)", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+    const last = el("circle", { cx: x(vals.length - 1), cy: y(vals[vals.length - 1]), r: 4, fill: "var(--s1)", stroke: "var(--surface)", "stroke-width": 2 }, svg);
+    const dot = el("circle", { r: 4, fill: "var(--s1)", stroke: "var(--surface)", "stroke-width": 2, visibility: "hidden" }, svg);
+    const hit = el("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent" }, svg);
+    hit.addEventListener("mousemove", (ev) => {
+      const r = svg.getBoundingClientRect(), vx = (ev.clientX - r.left) / r.width * W;
+      const i = Math.max(0, Math.min(pts.length - 1, Math.round((vx - L) / (W - L - R) * (pts.length - 1))));
+      dot.setAttribute("cx", x(i)); dot.setAttribute("cy", y(vals[i])); dot.setAttribute("visibility", "visible");
+      showTip(host, x(i) / W * r.width, y(vals[i]) / H * r.height, `${hhmm(pts[i][0])} · balance <b>${fmt(vals[i])}</b>`);
+    });
+    hit.addEventListener("mouseleave", () => { dot.setAttribute("visibility", "hidden"); hideTip(); });
+  }
+
+  // ---- panels ------------------------------------------------------------
+  function render(s) {
+    const sum = s.summary || {};
+    const modeChip = $("c-mode");
+    const acct = s.account || s.mode;
+    modeChip.textContent = acct === "real" ? "REAL MONEY" : (acct || "-").toUpperCase();
+    modeChip.className = "chip" + (acct === "real" ? " real" : "");
+    $("c-feed").textContent = s.feed === "pocket-option" ? "Pocket Option live feed" : s.feed === "synthetic" ? "Synthetic market" : "No feed";
+    $("c-dot").className = "dot " + s.status;
+    let st = s.status;
+    if (s.status === "running" && s.seconds_since_candle != null) st += ` · candle ${Math.round(s.seconds_since_candle)}s ago`;
+    $("c-status").textContent = st;
+    $("c-asset").textContent = `${s.asset} · ${s.period}s candles · ${s.expiry_seconds}s expiry · ${s.strategy}`;
+    $("pause").textContent = s.paused ? "Resume entries" : "Pause entries";
+    $("price-title").textContent = `${s.asset} price`;
+
+    $("b-error").classList.toggle("show", s.status === "error" && !!s.error);
+    $("b-error-t").textContent = s.error || "";
+    $("b-synth").classList.toggle("show", s.feed === "synthetic");
+    $("b-paused").classList.toggle("show", !!s.paused);
+
+    $("k-bal").textContent = fmt(s.balance);
+    $("k-bal-s").textContent = `${acct} account`;
+    $("k-pnl").textContent = signed(sum.pnl); $("k-pnl").className = "v " + cls(sum.pnl);
+    $("k-pnl-s").textContent = `ROI on staked ${pct(sum.roi)}`;
+    $("k-wr").textContent = sum.trades ? pct(sum.win_rate) : "-";
+    $("k-wr").className = "v " + (sum.trades ? (sum.win_rate > sum.breakeven ? "pos" : "neg") : "");
+    $("k-wr-s").textContent = sum.trades ? `95% range ${pct(sum.win_rate_95[0], 0)}–${pct(sum.win_rate_95[1], 0)} · needs ${pct(sum.breakeven)}` : "no settled trades yet";
+    $("k-n").textContent = sum.trades ?? 0;
+    $("k-n-s").textContent = `${sum.wins || 0} won · ${sum.losses || 0} lost · ${sum.draws || 0} draw`;
+    $("k-verdict").textContent = sum.verdict || "-";
+
+    const sig = s.signal || {};
+    $("s-dir").textContent = sig.direction ? `${sig.direction.toUpperCase()} · confidence ${pct(sig.confidence, 0)}` : "No trade";
+    $("s-dir").className = "sig";
+    $("s-reason").textContent = sig.reason ? `${sig.reason}${sig.time ? " · " + hhmm(sig.time) : ""}` : "-";
+    const f = sig.features || {};
+    $("s-feat").innerHTML = f.price == null ? "" :
+      `<dt>Close</dt><dd>${f.price.toFixed(5)}</dd>
+       <dt>Band</dt><dd>${f.bb_lower.toFixed(5)} – ${f.bb_upper.toFixed(5)}</dd>
+       <dt>RSI</dt><dd>${f.rsi.toFixed(1)}</dd>
+       <dt>Trend (band widths)</dt><dd>${f.trend >= 0 ? "+" : ""}${f.trend.toFixed(2)}</dd>`;
+    const sk = s.last_skip || {};
+    $("s-skip").textContent = sk.reason ? `Last skipped signal: ${sk.reason}` : "";
+
+    const r = s.risk || {};
+    const lim = r.daily_loss_limit || 0, loss = Math.max(0, -(r.day_pnl || 0));
+    $("r-pnl").innerHTML = `<span class="${cls(r.day_pnl)}">${signed(r.day_pnl)}</span> / −${fmt(lim)}`;
+    $("r-pnl-bar").style.width = lim ? Math.min(100, loss / lim * 100) + "%" : "0";
+    $("r-pnl-bar").style.background = loss / (lim || 1) > 0.7 ? "var(--crit)" : "var(--s1)";
+    $("r-trades").textContent = `${r.day_trades ?? 0} / ${r.max_trades_per_day ?? "-"}`;
+    $("r-trades-bar").style.width = r.max_trades_per_day ? Math.min(100, r.day_trades / r.max_trades_per_day * 100) + "%" : "0";
+    $("r-streak").textContent = r.consecutive_losses ?? 0;
+    $("r-payout").textContent = s.payout != null ? `${pct(s.payout, 0)} (min ${pct(r.min_payout, 0)})` : "-";
+    $("r-be").textContent = s.breakeven != null ? pct(s.breakeven) : "-";
+    const now = s.server_time;
+    $("r-state").textContent = r.halted ? "halted for the day" :
+      (r.paused_until && r.paused_until > (s.candles?.slice(-1)[0]?.time || 0)) ? "cooling down after losses" :
+      s.paused ? "paused from dashboard" : "trading allowed";
+
+    const open = s.open_trades || [];
+    $("open").innerHTML = open.length ? `<table><tr><th>Dir</th><th class="r">Stake</th><th class="r">Entry</th><th class="r">Payout</th><th class="r">Expires</th></tr>` +
+      open.map((t) => `<tr><td class="res open">${t.direction.toUpperCase()}</td><td class="r">${fmt(t.stake)}</td><td class="r">${t.entry != null ? t.entry.toFixed(5) : "-"}</td><td class="r">${pct(t.payout, 0)}</td><td class="r">${hhmmss(t.expires_at)}</td></tr>`).join("") + "</table>"
+      : '<div class="empty">No open trades.</div>';
+
+    const trades = s.trades || [];
+    $("trades").innerHTML = trades.length ? `<table><tr><th>Opened</th><th>Dir</th><th class="r">Stake</th><th class="r">Entry → Exit</th><th>Result</th><th class="r">P&amp;L</th></tr>` +
+      trades.slice(0, 25).map((t) => `<tr><td>${hhmm(t.opened_at)}</td><td>${t.direction.toUpperCase()}</td><td class="r">${fmt(t.stake)}</td>
+        <td class="r">${t.entry != null ? t.entry.toFixed(5) : "-"} → ${t.exit != null ? t.exit.toFixed(5) : "-"}</td>
+        <td class="res ${esc(t.result)}">${esc(t.result)}</td><td class="r ${cls(t.pnl)}">${signed(t.pnl)}</td></tr>`).join("") + "</table>"
+      : '<div class="empty">No settled trades yet.</div>';
+
+    $("events").innerHTML = (s.events || []).map((e) =>
+      `<div class="${esc(e.level)}"><span class="t">${hhmmss(e.time)}</span>${esc(e.message)}</div>`).join("") || '<div class="empty">Nothing yet.</div>';
+
+    const up = s.uptime || 0;
+    $("foot").textContent = `Up ${Math.floor(up / 3600)}h ${Math.floor(up % 3600 / 60)}m · connection attempts ${s.connects} · refreshed ${new Date().toLocaleTimeString()}`;
+
+    drawPrice(s);
+    drawEquity(s);
+  }
+
+  // ---- data loop ---------------------------------------------------------
+  const authHeaders = () => token ? { Authorization: "Bearer " + token } : {};
+  let timer = null, failures = 0;
+
+  async function load() {
+    try {
+      const res = await fetch("api/state", { headers: authHeaders(), cache: "no-store" });
+      if (res.status === 401) { askToken(); return; }
+      if (!res.ok) throw new Error(res.status);
+      const s = await res.json();
+      failures = 0;
+      $("login").style.display = "none";
+      $("app").hidden = false;
+      render(s);
+    } catch (e) {
+      failures++;
+      $("b-error").classList.add("show");
+      $("b-error-t").textContent = ` The dashboard cannot reach the bot (${e.message || e}). Retrying…`;
+    }
+    timer = setTimeout(load, failures ? Math.min(15000, 2000 * failures) : 2000);
+  }
+
+  function askToken() {
+    clearTimeout(timer);
+    $("app").hidden = true;
+    $("login").style.display = "block";
+    $("tokin").focus();
+  }
+  $("loginform").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    token = $("tokin").value.trim();
+    store.set("pb_token", token);
+    load();
+  });
+
+  $("pause").addEventListener("click", async () => {
+    const pausing = $("pause").textContent.startsWith("Pause");
+    await fetch("api/control/" + (pausing ? "pause" : "resume"), { method: "POST", headers: authHeaders() });
+    clearTimeout(timer); load();
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

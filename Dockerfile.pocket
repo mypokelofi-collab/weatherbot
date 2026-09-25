@@ -1,0 +1,52 @@
+# pocketbot - fixed-time trading bot for Pocket Option, with its dashboard.
+#
+# Same shape as the flowbot image: two stages, unprivileged user, writes only
+# to /app/data. The session string (SSID) and dashboard token come from the
+# environment at run time and are never baked into the image.
+
+FROM python:3.12-slim AS builder
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /build
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY requirements.txt requirements-pocket.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-pocket.txt
+
+
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    TZ=UTC \
+    PATH="/opt/venv/bin:$PATH" \
+    POCKETBOT_HOST=0.0.0.0 \
+    POCKETBOT_PORT=8040
+
+RUN ln -snf /usr/share/zoneinfo/UTC /etc/localtime && echo UTC > /etc/timezone \
+    && useradd --uid 10002 --create-home --shell /usr/sbin/nologin pocketbot
+
+COPY --from=builder /opt/venv /opt/venv
+
+WORKDIR /app
+# pocketbot reuses flowbot's indicator maths, so both packages ship.
+COPY flowbot ./flowbot
+COPY pocketbot ./pocketbot
+COPY config ./config
+
+RUN mkdir -p /app/data/pocketbot && chown -R pocketbot:pocketbot /app
+
+USER pocketbot
+EXPOSE 8040
+
+# Liveness only: 200 while the process is up, even while it is retrying the
+# broker, so docker never restarts the bot out from under its own backoff.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8040/api/health', timeout=4).status == 200 else 1)"
+
+ENTRYPOINT ["python", "-m", "pocketbot"]
+CMD ["-c", "config/pocketbot.yml", "serve"]
