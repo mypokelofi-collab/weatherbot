@@ -1,0 +1,143 @@
+1
+00:00:01,200 --> 00:00:05,004
+This is your breaking news update for Tuesday,
+
+2
+00:00:05,004 --> 00:00:06,789
+November 17th, 2026.
+
+3
+00:00:07,139 --> 00:00:09,187
+Here are today's top headlines.
+
+4
+00:00:10,137 --> 00:00:12,569
+Tensions with Iran are escalating.
+
+5
+00:00:12,919 --> 00:00:16,067
+Iran's Revolutionary Guard says it struck
+
+6
+00:00:16,067 --> 00:00:19,071
+a U.S. radar system at Bahrain's Sheikh
+
+7
+00:00:19,071 --> 00:00:20,215
+Isa air base.
+
+8
+00:00:20,565 --> 00:00:23,229
+A third American aircraft carrier has now
+
+9
+00:00:23,229 --> 00:00:24,622
+arrived in the Gulf,
+
+10
+00:00:24,622 --> 00:00:26,923
+and Qatar is calling for restraint.
+
+11
+00:00:27,873 --> 00:00:31,092
+Reports say U.S. intelligence is assessing
+
+12
+00:00:31,092 --> 00:00:34,455
+possible Iranian plots targeting Washington,
+
+13
+00:00:34,455 --> 00:00:34,955
+D.C.
+
+14
+00:00:35,305 --> 00:00:37,491
+The White House says there is no credible
+
+15
+00:00:37,491 --> 00:00:38,633
+threat at this time.
+
+16
+00:00:38,983 --> 00:00:40,995
+President Trump says the U.S.
+
+17
+00:00:40,995 --> 00:00:43,762
+takes any possible threat very seriously.
+
+18
+00:00:44,712 --> 00:00:47,129
+In Asia, President Trump is visiting the
+
+19
+00:00:47,129 --> 00:00:48,872
+Philippines for trade talks.
+
+20
+00:00:49,222 --> 00:00:52,109
+He also says he could potentially meet North
+
+21
+00:00:52,109 --> 00:00:54,443
+Korean leader Kim Jong Un in China,
+
+22
+00:00:54,443 --> 00:00:56,838
+on the sidelines of the APEC summit.
+
+23
+00:00:57,788 --> 00:01:00,718
+Back home, customers are reporting outages
+
+24
+00:01:00,718 --> 00:01:03,844
+at major banks, while United Airlines reports
+
+25
+00:01:03,844 --> 00:01:05,276
+widespread outages.
+
+26
+00:01:05,626 --> 00:01:07,213
+These are early reports,
+
+27
+00:01:07,213 --> 00:01:08,741
+and details may change.
+
+28
+00:01:09,691 --> 00:01:12,761
+In South Korea, with the national college
+
+29
+00:01:12,761 --> 00:01:15,273
+entrance exam just two days away,
+
+30
+00:01:15,273 --> 00:01:18,274
+officials are set to unveil new measures
+
+31
+00:01:18,274 --> 00:01:20,507
+against AI-assisted cheating.
+
+32
+00:01:21,457 --> 00:01:24,612
+And in entertainment, Amazon MGM Studios
+
+33
+00:01:24,612 --> 00:01:27,913
+has confirmed that Robert Pattinson is the
+
+34
+00:01:27,913 --> 00:01:29,307
+next James Bond.
+
+35
+00:01:30,257 --> 00:01:32,651
+That's your update. Stay tuned for more
+
+36
+00:01:32,651 --> 00:01:34,247
+as these stories develop.
