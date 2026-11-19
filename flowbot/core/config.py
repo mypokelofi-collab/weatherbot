@@ -197,6 +197,22 @@ class PolymarketConfig(BaseModel):
     calibration_b: float = 0.0
 
 
+class XConfig(BaseModel):
+    """Posting entry signals to X. Credentials come from X_API_* env vars only."""
+
+    enabled: bool = False
+    dry_run: bool = True                 # log posts to x_posts.jsonl instead of sending
+    min_score: float = 0.0               # extra bar above signal.entry_threshold
+    post_shorts: bool = True
+    min_interval_minutes: int = 60       # between any two posts
+    repeat_after_minutes: int = 240      # before re-posting the same direction
+    max_posts_per_day: int = 12          # X Free tier is ~500 posts/month
+    asset: str = "$BTC"
+    timeframe: str = "15m"
+    hashtags: list[str] = Field(default_factory=lambda: ["#Bitcoin", "#BTC"])
+    disclaimer: str = "Automated paper-trading signal. Not financial advice."
+
+
 class AppConfig(BaseModel):
     mode: Literal["paper"] = "paper"     # live trading is intentionally absent
     log_level: str = "INFO"
@@ -208,6 +224,7 @@ class AppConfig(BaseModel):
     execution: ExecConfig = Field(default_factory=ExecConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     polymarket: PolymarketConfig = Field(default_factory=PolymarketConfig)
+    x: XConfig = Field(default_factory=XConfig)
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()

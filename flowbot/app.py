@@ -66,6 +66,14 @@ def build_trader(cfg: AppConfig) -> tuple[Trader, Recorder | None]:
         )
         log.info("polymarket pipeline enabled (paper, read-only)")
 
+    if cfg.x.enabled:
+        from .social.x_poster import XPoster
+
+        poster = XPoster(cfg.x, state_dir=state_dir)
+        bus.on("bar", poster.on_bar)
+        trader.x_poster = poster
+        log.info("x poster enabled (%s)", "dry run" if poster.cfg.dry_run else "LIVE")
+
     return trader, recorder
 
 

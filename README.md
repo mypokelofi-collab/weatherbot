@@ -119,6 +119,26 @@ FLOWBOT_SIGNAL__ENTRY_THRESHOLD=0.40
 FLOWBOT_DATA__VENUE=binance-spot
 ```
 
+## Posting signals to X
+
+`flowbot/social/x_poster.py` posts each entry signal (long or short, gates
+clear) to X through the v2 API, e.g.
+
+```
+🟢 $BTC 15m momentum: LONG signal
+Price $73,497 · score +0.46 · ADX 18
+Driven by: EMA trend, MACD, momentum
+
+Automated paper-trading signal. Not financial advice. #Bitcoin #BTC
+```
+
+Off by default. `FLOWBOT_X__ENABLED=true` turns it on in **dry run**: posts go
+to `data/state/x_posts.jsonl` and the log, nothing is sent. Add
+`X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET` and set
+`FLOWBOT_X__DRY_RUN=false` to go live. It posts at most once an hour, 12 times
+a day, never the same direction twice within 4 hours (all in the `x:` config
+section), and a failed post never touches trading.
+
 ## Dashboard
 
 Served on `:8033`, no external CDN, works on a phone. It shows equity and
